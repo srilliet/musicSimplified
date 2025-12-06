@@ -6,6 +6,7 @@ class Track(models.Model):
     track_name = models.CharField(max_length=500)
     album = models.CharField(max_length=500, blank=True, null=True)
     artist_name = models.CharField(max_length=500, blank=True, null=True)
+    genre = models.CharField(max_length=200, blank=True, null=True)
     download = models.IntegerField(default=0)
     failed_download = models.IntegerField(default=0)
     
@@ -21,6 +22,7 @@ class NewTrack(models.Model):
     artist_name = models.CharField(max_length=500)
     track_name = models.CharField(max_length=500)
     album = models.CharField(max_length=500, blank=True, null=True)
+    genre = models.CharField(max_length=200, blank=True, null=True)
     
     class Meta:
         db_table = 'new_tracks'

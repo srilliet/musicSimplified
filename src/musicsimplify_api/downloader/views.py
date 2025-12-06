@@ -188,6 +188,7 @@ def get_tracks(request):
             'track_name': track.track_name,
             'album': track.album,
             'artist_name': track.artist_name,
+            'genre': track.genre,
             'download': track.download,
             'failed_download': track.failed_download
         })

@@ -36,6 +36,7 @@ def load_csv_file(request):
             track_name = row.get('Track Name', '').strip()
             album = row.get('Album Name', '').strip()
             artist_name = row.get('Artist Name(s)', '').strip()
+            genre = row.get('Genre', '').strip()
             
             if track_name:
                 if not Track.objects.filter(track_name=track_name, artist_name=artist_name).exists():
@@ -43,6 +44,7 @@ def load_csv_file(request):
                         track_name=track_name,
                         album=album if album else None,
                         artist_name=artist_name if artist_name else None,
+                        genre=genre if genre else None,
                         download=0,
                         failed_download=0
                     )
@@ -102,6 +104,7 @@ def load_csv_from_directory(request):
                     track_name = row.get('Track Name', '').strip()
                     album = row.get('Album Name', '').strip()
                     artist_name = row.get('Artist Name(s)', '').strip()
+                    genre = row.get('Genre', '').strip()
                     
                     if track_name:
                         if not Track.objects.filter(track_name=track_name, artist_name=artist_name).exists():
@@ -109,6 +112,7 @@ def load_csv_from_directory(request):
                                 track_name=track_name,
                                 album=album if album else None,
                                 artist_name=artist_name if artist_name else None,
+                                genre=genre if genre else None,
                                 download=0,
                                 failed_download=0
                             )

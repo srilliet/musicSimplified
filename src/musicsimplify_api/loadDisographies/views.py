@@ -47,6 +47,7 @@ def load_all_discographies(request):
                 track_name = track_data.get('track_name', '')
                 album = track_data.get('album', '')
                 artist = track_data.get('artist_name', artist_name)
+                genre = track_data.get('genre', '')
                 
                 if track_name and not NewTrack.objects.filter(
                     artist_name=artist,
@@ -55,7 +56,8 @@ def load_all_discographies(request):
                     NewTrack.objects.create(
                         artist_name=artist,
                         track_name=track_name,
-                        album=album if album else None
+                        album=album if album else None,
+                        genre=genre if genre else None
                     )
                     new_count += 1
                 else:
@@ -101,6 +103,7 @@ def load_artist_discography(request):
             track_name = track_data.get('track_name', '')
             album = track_data.get('album', '')
             artist = track_data.get('artist_name', artist_name)
+            genre = track_data.get('genre', '')
             
             if track_name and not NewTrack.objects.filter(
                 artist_name=artist,
@@ -109,7 +112,8 @@ def load_artist_discography(request):
                 NewTrack.objects.create(
                     artist_name=artist,
                     track_name=track_name,
-                    album=album if album else None
+                    album=album if album else None,
+                    genre=genre if genre else None
                 )
                 new_count += 1
             else:
@@ -145,7 +149,8 @@ def get_new_tracks(request):
             'id': track.id,
             'artist_name': track.artist_name,
             'track_name': track.track_name,
-            'album': track.album
+            'album': track.album,
+            'genre': track.genre
         })
     
     return Response({
