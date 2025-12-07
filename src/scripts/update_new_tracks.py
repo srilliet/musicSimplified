@@ -158,7 +158,6 @@ def main():
         'total_new_tracks': 0,
         'total_duplicates': 0,
         'artists_with_100_plus': 0,
-        'spotify_count': 0,
         'youtube_count': 0
     }
     
@@ -172,9 +171,7 @@ def main():
         if result['tracks_found'] > 100:
             stats['artists_with_100_plus'] += 1
         
-        if result.get('api_used') == 'Spotify':
-            stats['spotify_count'] += 1
-        elif result.get('api_used') == 'YouTube Music':
+        if result.get('api_used') == 'YouTube Music':
             stats['youtube_count'] += 1
         
         if result['success']:
@@ -197,7 +194,6 @@ def main():
     print(f"  Duplicates skipped: {stats['total_duplicates']}")
     print(f"  Artists with 100+ tracks: {stats['artists_with_100_plus']}")
     print(f"\nAPI Usage:")
-    print(f"  Spotify: {stats['spotify_count']} artists")
     print(f"  YouTube Music: {stats['youtube_count']} artists")
     print("\nAll missing tracks have been added to the new_tracks table.")
 

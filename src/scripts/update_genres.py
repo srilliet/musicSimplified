@@ -4,9 +4,9 @@ Script to update genre information for tracks in both tracks and new_tracks tabl
 
 This script:
 1. Finds all tracks without genre in both tables
-2. Groups tracks by artist to minimize API calls
-3. Fetches genre from Spotify API for each artist
-4. Updates all tracks for that artist with the genre information
+2. Fetches song-level genre from MusicBrainz API for each track
+3. Updates each track with its specific genre information
+4. Uses rate limiting (2 seconds between requests) to respect MusicBrainz API limits
 """
 
 import os
@@ -19,54 +19,78 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'musicsimplify_a
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'musicsimplify_api.settings')
 django.setup()
 
-from downloader.models import Track, NewTrack
-import spotipy
-from spotipy.oauth2 import SpotifyClientCredentials
+from downloader.models import Track, NewTrack  # type: ignore
 from ytmusicapi import YTMusic
+import musicbrainzngs
 
 
-def get_spotify_client():
-    """Get Spotify client if credentials are available."""
-    client_id = os.getenv('SPOTIFY_CLIENT_ID')
-    client_secret = os.getenv('SPOTIFY_CLIENT_SECRET')
-    
-    if not client_id or not client_secret:
-        return None
-    
-    try:
-        client_credentials_manager = SpotifyClientCredentials(
-            client_id=client_id,
-            client_secret=client_secret
-        )
-        sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
-        return sp
-    except Exception as e:
-        print(f"Error creating Spotify client: {e}")
-        return None
-
-
-def get_artist_genre_spotify(artist_name, spotify_client):
+def get_song_genre_musicbrainz(artist_name, track_name):
     """
-    Fetch genre for an artist from Spotify.
+    Fetch genre for a specific song from MusicBrainz API.
+    Uses 2 second delay to respect rate limits and avoid getting banned.
     
     Args:
         artist_name (str): Name of the artist
-        spotify_client: Spotify client instance
+        track_name (str): Name of the track
         
     Returns:
         str: Primary genre or None if not found
     """
     try:
-        results = spotify_client.search(q=f'artist:{artist_name}', type='artist', limit=1)
+        musicbrainzngs.set_useragent("MusicSimplify", "1.0", "https://github.com/srilliet/musicSimplified")
         
-        if not results['artists']['items']:
+        # Search for recordings (songs) by artist and track name
+        query = f'artist:"{artist_name}" AND recording:"{track_name}"'
+        result = musicbrainzngs.search_recordings(query=query, limit=1)
+        time.sleep(2)  # Rate limit: 2 seconds between API calls
+        
+        if not result.get('recording-list'):
             return None
         
-        artist = results['artists']['items'][0]
-        genres = artist.get('genres', [])
+        recording = result['recording-list'][0]
+        recording_id = recording.get('id')
         
-        if genres:
-            return genres[0]
+        if not recording_id:
+            return None
+        
+        # Get detailed recording info with tags
+        time.sleep(2)  # Rate limit: 2 seconds between API calls
+        try:
+            recording_info = musicbrainzngs.get_recording_by_id(recording_id, includes=['tags'])
+            
+            if 'tag-list' in recording_info.get('recording', {}):
+                tags = recording_info['recording']['tag-list']
+                if isinstance(tags, list) and len(tags) > 0:
+                    if isinstance(tags[0], dict):
+                        genre_tags = [tag.get('name', '') for tag in tags if tag.get('name')]
+                    else:
+                        genre_tags = [tags[0].get('name', '')] if isinstance(tags[0], dict) else []
+                    if genre_tags:
+                        return genre_tags[0]
+        except:
+            pass
+        
+        # Try release-group tags if recording tags not available
+        if 'release-list' in recording and len(recording['release-list']) > 0:
+            release = recording['release-list'][0]
+            release_group_id = release.get('release-group', {}).get('id')
+            
+            if release_group_id:
+                time.sleep(2)  # Rate limit: 2 seconds between API calls
+                try:
+                    release_group_info = musicbrainzngs.get_release_group_by_id(release_group_id, includes=['tags'])
+                    
+                    if 'tag-list' in release_group_info.get('release-group', {}):
+                        tags = release_group_info['release-group']['tag-list']
+                        if isinstance(tags, list) and len(tags) > 0:
+                            if isinstance(tags[0], dict):
+                                genre_tags = [tag.get('name', '') for tag in tags if tag.get('name')]
+                            else:
+                                genre_tags = [tags[0].get('name', '')] if isinstance(tags[0], dict) else []
+                            if genre_tags:
+                                return genre_tags[0]
+                except:
+                    pass
         
         return None
     except Exception as e:
@@ -119,36 +143,34 @@ def get_artist_genre_youtube_music(artist_name):
         return None
 
 
-def get_artist_genre(artist_name, spotify_client=None):
+def get_song_genre(artist_name, track_name):
     """
-    Fetch genre for an artist, trying Spotify first, then YouTube Music.
+    Fetch genre for a specific song, trying MusicBrainz first, then YouTube Music.
     
     Args:
         artist_name (str): Name of the artist
-        spotify_client: Spotify client instance (optional)
+        track_name (str): Name of the track
         
     Returns:
         str: Primary genre or None if not found
     """
-    genre = None
+    genre = get_song_genre_musicbrainz(artist_name, track_name)
+    if genre:
+        return genre
     
-    if spotify_client:
-        genre = get_artist_genre_spotify(artist_name, spotify_client)
-        if genre:
-            return genre
-    
+    # Fallback to YouTube Music (less reliable for song-level)
     genre = get_artist_genre_youtube_music(artist_name)
     return genre
 
 
 def get_tracks_without_genre():
     """
-    Get all tracks without genre from both tables, grouped by artist.
+    Get all tracks without genre from both tables.
     
     Returns:
-        dict: {artist_name: {'tracks': [track_ids], 'new_tracks': [new_track_ids]}}
+        list: List of track dictionaries with id, artist_name, track_name, table_type
     """
-    tracks_by_artist = {}
+    tracks_list = []
     
     tracks = Track.objects.filter(
         genre__isnull=True
@@ -156,13 +178,19 @@ def get_tracks_without_genre():
         artist_name__isnull=True
     ).exclude(
         artist_name=''
-    ).values('id', 'artist_name')
+    ).exclude(
+        track_name__isnull=True
+    ).exclude(
+        track_name=''
+    ).values('id', 'artist_name', 'track_name')
     
     for track in tracks:
-        artist = track['artist_name']
-        if artist not in tracks_by_artist:
-            tracks_by_artist[artist] = {'tracks': [], 'new_tracks': []}
-        tracks_by_artist[artist]['tracks'].append(track['id'])
+        tracks_list.append({
+            'id': track['id'],
+            'artist_name': track['artist_name'],
+            'track_name': track['track_name'],
+            'table_type': 'tracks'
+        })
     
     new_tracks = NewTrack.objects.filter(
         genre__isnull=True
@@ -170,56 +198,62 @@ def get_tracks_without_genre():
         artist_name__isnull=True
     ).exclude(
         artist_name=''
-    ).values('id', 'artist_name')
+    ).exclude(
+        track_name__isnull=True
+    ).exclude(
+        track_name=''
+    ).values('id', 'artist_name', 'track_name')
     
     for track in new_tracks:
-        artist = track['artist_name']
-        if artist not in tracks_by_artist:
-            tracks_by_artist[artist] = {'tracks': [], 'new_tracks': []}
-        tracks_by_artist[artist]['new_tracks'].append(track['id'])
+        tracks_list.append({
+            'id': track['id'],
+            'artist_name': track['artist_name'],
+            'track_name': track['track_name'],
+            'table_type': 'new_tracks'
+        })
     
-    return tracks_by_artist
+    return tracks_list
 
 
-def update_artist_genre(artist_name, genre, spotify_client):
+def update_track_genre(track_id, artist_name, track_name, table_type, genre):
     """
-    Update genre for all tracks of a specific artist.
+    Update genre for a specific track.
     
     Args:
+        track_id: ID of the track
         artist_name (str): Name of the artist
-        genre (str): Genre to set
-        spotify_client: Spotify client instance
+        track_name (str): Name of the track
+        table_type (str): 'tracks' or 'new_tracks'
+        genre (str): Genre to set (if None, will fetch from API)
         
     Returns:
         dict: Statistics about the update
     """
     if not genre:
-        genre = get_artist_genre(artist_name, spotify_client)
+        genre = get_song_genre(artist_name, track_name)
+        time.sleep(2)  # Rate limit: 2 seconds after API call
     
     if not genre:
         return {
+            'track_id': track_id,
             'artist': artist_name,
+            'track': track_name,
             'genre': None,
-            'tracks_updated': 0,
-            'new_tracks_updated': 0,
+            'updated': False,
             'success': False
         }
     
-    tracks_updated = Track.objects.filter(
-        artist_name=artist_name,
-        genre__isnull=True
-    ).update(genre=genre)
-    
-    new_tracks_updated = NewTrack.objects.filter(
-        artist_name=artist_name,
-        genre__isnull=True
-    ).update(genre=genre)
+    if table_type == 'tracks':
+        updated = Track.objects.filter(id=track_id, genre__isnull=True).update(genre=genre)
+    else:
+        updated = NewTrack.objects.filter(id=track_id, genre__isnull=True).update(genre=genre)
     
     return {
+        'track_id': track_id,
         'artist': artist_name,
+        'track': track_name,
         'genre': genre,
-        'tracks_updated': tracks_updated,
-        'new_tracks_updated': new_tracks_updated,
+        'updated': updated > 0,
         'success': True
     }
 
@@ -232,79 +266,71 @@ def main():
     print("Updating Genre Information")
     print("=" * 60)
     
-    spotify_client = get_spotify_client()
-    
-    if spotify_client:
-        print("\n✓ Spotify API configured - will use Spotify first, YouTube Music as fallback")
-    else:
-        print("\n⚠️  Spotify API credentials not configured!")
-        print("Will use YouTube Music API to fetch genre information.")
-        print("(Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET for better results)")
+    print("\n✓ Using MusicBrainz API to fetch genre information")
     
     print("\nStep 1: Finding tracks without genre...")
-    tracks_by_artist = get_tracks_without_genre()
+    tracks_list = get_tracks_without_genre()
     
-    if not tracks_by_artist:
+    if not tracks_list:
         print("No tracks found without genre!")
         return
     
-    total_tracks = sum(len(data['tracks']) for data in tracks_by_artist.values())
-    total_new_tracks = sum(len(data['new_tracks']) for data in tracks_by_artist.values())
+    tracks_count = sum(1 for t in tracks_list if t['table_type'] == 'tracks')
+    new_tracks_count = sum(1 for t in tracks_list if t['table_type'] == 'new_tracks')
     
-    print(f"Found {len(tracks_by_artist)} unique artists with missing genre")
-    print(f"  - {total_tracks} tracks in tracks table")
-    print(f"  - {total_new_tracks} tracks in new_tracks table")
-    print(f"  - Total: {total_tracks + total_new_tracks} tracks to update")
+    print(f"Found {len(tracks_list)} tracks with missing genre")
+    print(f"  - {tracks_count} tracks in tracks table")
+    print(f"  - {new_tracks_count} tracks in new_tracks table")
+    print(f"  - Total: {len(tracks_list)} tracks to update")
     
-    api_source = "Spotify/YouTube Music" if spotify_client else "YouTube Music"
-    print(f"\nStep 2: Fetching genres from {api_source} for {len(tracks_by_artist)} artists...")
+    print(f"\nStep 2: Fetching song-level genres from MusicBrainz...")
+    print("⚠️  Rate limiting: 2 seconds between requests to respect MusicBrainz API limits")
     print("This may take a while...\n")
     
     stats = {
-        'total_artists': len(tracks_by_artist),
-        'artists_processed': 0,
-        'artists_failed': 0,
-        'total_tracks_updated': 0,
-        'total_new_tracks_updated': 0,
-        'total_updated': 0
+        'total_tracks': len(tracks_list),
+        'tracks_updated': 0,
+        'tracks_failed': 0,
+        'tracks_table_updated': 0,
+        'new_tracks_table_updated': 0
     }
     
-    for i, (artist_name, track_data) in enumerate(sorted(tracks_by_artist.items()), 1):
-        track_count = len(track_data['tracks'])
-        new_track_count = len(track_data['new_tracks'])
-        total_count = track_count + new_track_count
+    for i, track_data in enumerate(tracks_list, 1):
+        track_id = track_data['id']
+        artist_name = track_data['artist_name']
+        track_name = track_data['track_name']
+        table_type = track_data['table_type']
         
-        print(f"[{i}/{len(tracks_by_artist)}] Processing: {artist_name} ({total_count} tracks)")
+        print(f"[{i}/{len(tracks_list)}] Processing: {artist_name} - {track_name}")
         
-        genre = get_artist_genre(artist_name, spotify_client)
-        result = update_artist_genre(artist_name, genre, spotify_client)
+        result = update_track_genre(track_id, artist_name, track_name, table_type, None)
         
-        if result['success']:
-            stats['artists_processed'] += 1
-            stats['total_tracks_updated'] += result['tracks_updated']
-            stats['total_new_tracks_updated'] += result['new_tracks_updated']
-            stats['total_updated'] += result['tracks_updated'] + result['new_tracks_updated']
+        if result['success'] and result['updated']:
+            stats['tracks_updated'] += 1
+            if table_type == 'tracks':
+                stats['tracks_table_updated'] += 1
+            else:
+                stats['new_tracks_table_updated'] += 1
             
             print(f"  ✓ Genre: {result['genre']}")
-            print(f"    - Updated {result['tracks_updated']} tracks")
-            print(f"    - Updated {result['new_tracks_updated']} new_tracks")
         else:
-            stats['artists_failed'] += 1
+            stats['tracks_failed'] += 1
             print(f"  ✗ No genre found")
         
-        if i < len(tracks_by_artist):
-            time.sleep(0.2)
+        # Rate limiting: 2 second delay between tracks to be safe
+        if i < len(tracks_list):
+            time.sleep(2)
     
     print("\n" + "=" * 60)
     print("Update Complete!")
     print("=" * 60)
     print(f"\nSummary:")
-    print(f"  Total artists processed: {stats['total_artists']}")
-    print(f"  Successfully processed: {stats['artists_processed']}")
-    print(f"  Failed: {stats['artists_failed']}")
-    print(f"  Tracks updated: {stats['total_tracks_updated']}")
-    print(f"  New tracks updated: {stats['total_new_tracks_updated']}")
-    print(f"  Total tracks updated: {stats['total_updated']}")
+    print(f"  Total tracks processed: {stats['total_tracks']}")
+    print(f"  Successfully updated: {stats['tracks_updated']}")
+    print(f"  Failed: {stats['tracks_failed']}")
+    print(f"  Tracks table updated: {stats['tracks_table_updated']}")
+    print(f"  New tracks table updated: {stats['new_tracks_table_updated']}")
+    print(f"  Total tracks updated: {stats['tracks_updated']}")
     print("\nAll genre information has been updated in the database.")
 
 

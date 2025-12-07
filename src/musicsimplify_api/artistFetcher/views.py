@@ -4,29 +4,9 @@ import logging
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-import spotipy
-from spotipy.oauth2 import SpotifyClientCredentials
 from ytmusicapi import YTMusic
 
 logger = logging.getLogger(__name__)
-
-
-def get_spotify_client():
-    client_id = os.getenv('SPOTIFY_CLIENT_ID')
-    client_secret = os.getenv('SPOTIFY_CLIENT_SECRET')
-    
-    if not client_id or not client_secret:
-        return None
-    
-    try:
-        client_credentials_manager = SpotifyClientCredentials(
-            client_id=client_id,
-            client_secret=client_secret
-        )
-        sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
-        return sp
-    except Exception as e:
-        return None
 
 
 def fetch_artist_discography_youtube_music(artist_name):
@@ -116,116 +96,18 @@ def fetch_artist_discography_youtube_music(artist_name):
         return []
 
 
-def fetch_artist_discography_spotify(artist_name, spotify_client):
-    try:
-        logger.info(f"Using Spotify API for artist: {artist_name}")
-        results = spotify_client.search(q=f'artist:{artist_name}', type='artist', limit=1)
-        
-        if not results['artists']['items']:
-            logger.warning(f"No artist found on Spotify for: {artist_name}")
-            return []
-        
-        artist = results['artists']['items'][0]
-        artist_id = artist['id']
-        artist_genres = artist.get('genres', [])
-        primary_genre = artist_genres[0] if artist_genres else None
-        logger.info(f"Found Spotify artist: {artist['name']} (ID: {artist_id}), Genres: {artist_genres}")
-        
-        albums = []
-        offset = 0
-        limit = 50
-        
-        while True:
-            try:
-                results = spotify_client.artist_albums(
-                    artist_id,
-                    album_type='album,single,compilation',
-                    limit=limit,
-                    offset=offset
-                )
-                albums.extend(results['items'])
-                
-                if len(results['items']) < limit:
-                    break
-                offset += limit
-                time.sleep(0.2)
-            except Exception as e:
-                logger.warning(f"Error fetching albums from Spotify (offset {offset}): {e}")
-                break
-        
-        logger.info(f"Spotify: Found {len(albums)} albums for {artist_name}")
-        
-        tracks = []
-        seen_tracks = set()
-        
-        for album in albums:
-            album_name = album['name']
-            album_id = album['id']
-            album_genres = album.get('genres', [])
-            album_primary_genre = album_genres[0] if album_genres else primary_genre
-            
-            try:
-                album_tracks_result = spotify_client.album_tracks(album_id, limit=50)
-                album_tracks = album_tracks_result['items']
-                
-                track_offset = 0
-                while True:
-                    for item in album_tracks:
-                        track_name = item['name'].strip()
-                        if track_name:
-                            track_key = (track_name.lower(), artist_name.lower())
-                            if track_key not in seen_tracks:
-                                seen_tracks.add(track_key)
-                                tracks.append({
-                                    'track_name': track_name,
-                                    'album': album_name,
-                                    'artist_name': artist_name,
-                                    'genre': album_primary_genre
-                                })
-                    
-                    if album_tracks_result.get('next'):
-                        track_offset += 50
-                        album_tracks_result = spotify_client.album_tracks(album_id, limit=50, offset=track_offset)
-                        album_tracks = album_tracks_result['items']
-                    else:
-                        break
-                
-                time.sleep(0.2)
-            except Exception as e:
-                logger.debug(f"Error fetching tracks from album {album_name}: {e}")
-                continue
-        
-        logger.info(f"Spotify: Total {len(tracks)} unique tracks found for {artist_name}")
-        return tracks
-    except Exception as e:
-        logger.error(f"Spotify error for {artist_name}: {e}")
-        return []
-
-
 def fetch_artist_discography_helper(artist_name):
-    spotify_client = get_spotify_client()
     api_used = None
     
     tracks = []
-    if spotify_client:
-        try:
-            logger.info(f"Attempting to fetch from Spotify for: {artist_name}")
-            tracks = fetch_artist_discography_spotify(artist_name, spotify_client)
-            if tracks:
-                api_used = 'Spotify'
-                logger.info(f"Successfully fetched {len(tracks)} tracks from Spotify for {artist_name}")
-        except Exception as e:
-            logger.warning(f"Spotify fetch failed for {artist_name}, falling back to YouTube Music: {e}")
-    
-    if not tracks:
-        try:
-            logger.info(f"Fetching from YouTube Music for: {artist_name}")
-            tracks = fetch_artist_discography_youtube_music(artist_name)
-            if tracks:
-                api_used = 'YouTube Music'
-                logger.info(f"Successfully fetched {len(tracks)} tracks from YouTube Music for {artist_name}")
-        except Exception as e:
-            logger.error(f"YouTube Music fetch failed for {artist_name}: {e}")
+    try:
+        logger.info(f"Fetching from YouTube Music for: {artist_name}")
+        tracks = fetch_artist_discography_youtube_music(artist_name)
+        if tracks:
+            api_used = 'YouTube Music'
+            logger.info(f"Successfully fetched {len(tracks)} tracks from YouTube Music for {artist_name}")
+    except Exception as e:
+        logger.error(f"YouTube Music fetch failed for {artist_name}: {e}")
     
     result = {
         'artist_name': artist_name,

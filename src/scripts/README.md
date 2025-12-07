@@ -8,7 +8,7 @@ Processes artist collaborations in the database and fetches discographies for ea
 
 1. Finds all tracks where `artist_name` contains `;` (collaborations)
 2. Extracts unique artist names from these collaborations
-3. For each artist, fetches their complete discography from Spotify/YouTube Music
+3. For each artist, fetches their complete discography from YouTube Music
 4. Saves all tracks to the `new_tracks` table for future downloads
 
 ### Example:
@@ -43,10 +43,7 @@ python src/scripts/process_collaborations.py
 
 - Django environment must be set up
 - Database must be initialized
-- Spotify API credentials (optional, will fallback to YouTube Music if not configured)
-- Environment variables (optional):
-  - `SPOTIFY_CLIENT_ID`
-  - `SPOTIFY_CLIENT_SECRET`
+- No API credentials required (uses YouTube Music API)
 
 ### Output:
 
@@ -99,16 +96,16 @@ python src/scripts/update_new_tracks.py
 ### Features:
 
 - Only adds missing tracks (no duplicates)
-- Shows which API was used (Spotify vs YouTube Music)
+- Shows which API was used (YouTube Music)
 - Displays statistics including artists with 100+ tracks
 - Improved pagination should fetch complete discographies
-- Includes genre information when available from Spotify
+- Includes genre information when available
 
 ### Output:
 
 The script will:
 - Display progress for each artist
-- Show API used (Spotify/YouTube Music)
+- Show API used (YouTube Music)
 - Highlight when more than 100 tracks are found
 - Show statistics at the end:
   - Total artists processed
@@ -123,7 +120,7 @@ The script will:
 - The script includes a 1-second delay between artists to avoid rate limiting
 - Only missing tracks are added (existing tracks are skipped)
 - With improved pagination, you should see more than 100 tracks per artist
-- Genre information is included when fetching from Spotify
+- Genre information is included when available
 
 ## update_genres.py
 
@@ -133,7 +130,7 @@ Updates genre information for tracks missing genre in both `tracks` and `new_tra
 
 1. Finds all tracks without genre in both `tracks` and `new_tracks` tables
 2. Groups tracks by artist to minimize API calls
-3. Fetches genre from Spotify API for each artist
+3. Fetches genre from MusicBrainz API for each artist
 4. Updates all tracks for that artist with the genre information
 
 ### Usage:
@@ -158,17 +155,13 @@ python src/scripts/update_genres.py
 
 ### Requirements:
 
-- Spotify API credentials must be configured:
-  ```bash
-  export SPOTIFY_CLIENT_ID=your_client_id
-  export SPOTIFY_CLIENT_SECRET=your_client_secret
-  ```
+- No API credentials required (uses MusicBrainz API which is free and open)
 
 ### Features:
 
 - Updates both `tracks` and `new_tracks` tables
 - Groups by artist to minimize API calls
-- Uses primary genre from Spotify artist information
+- Uses primary genre from MusicBrainz artist tags
 - Only updates tracks that don't have genre (skips existing genres)
 
 ### Output:
@@ -186,5 +179,5 @@ The script will:
 
 - The script includes a 0.2-second delay between artists to avoid rate limiting
 - Only tracks without genre are updated (existing genres are preserved)
-- If Spotify API is not configured, the script will exit with a warning
+- Uses MusicBrainz API (free, no credentials required)
 

@@ -25,8 +25,6 @@ def load_all_discographies(request):
             'total_new_tracks': 0
         }, status=status.HTTP_200_OK)
     
-    spotify_configured = bool(os.getenv('SPOTIFY_CLIENT_ID') and os.getenv('SPOTIFY_CLIENT_SECRET'))
-    
     total_new_tracks = 0
     artists_processed = 0
     artists_failed = 0
@@ -77,8 +75,7 @@ def load_all_discographies(request):
         'message': 'Processing complete',
         'artists_processed': artists_processed,
         'artists_failed': artists_failed,
-        'total_new_tracks': total_new_tracks,
-        'spotify_configured': spotify_configured
+        'total_new_tracks': total_new_tracks
     }, status=status.HTTP_200_OK)
 
 
