@@ -171,3 +171,8 @@ LOGGING = {
         },
     },
 }
+
+# Music root directory path
+# This is the base directory where all music files are stored
+# Individual track paths are stored as relative_path in the Track model
+ROOT_MUSIC_PATH = '/home/stephen/Music'

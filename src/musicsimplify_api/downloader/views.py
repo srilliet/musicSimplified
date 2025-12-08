@@ -5,7 +5,7 @@ from pathlib import Path
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-from .models import Track
+from .models import Track, Settings
 
 
 def sanitize_filename(filename):
@@ -190,7 +190,9 @@ def get_tracks(request):
             'artist_name': track.artist_name,
             'genre': track.genre,
             'download': track.download,
-            'failed_download': track.failed_download
+            'failed_download': track.failed_download,
+            'relative_path': track.relative_path,
+            'file_found': track.file_found
         })
     
     return Response({
@@ -205,3 +207,39 @@ def get_undownloaded_count(request):
     return Response({
         'count': count
     }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET', 'PUT'])
+def get_or_update_settings(request):
+    """
+    Get or update application settings.
+    GET: Returns current settings
+    PUT: Updates settings (requires 'root_music_path' in request data)
+    """
+    settings = Settings.get_settings()
+    
+    if request.method == 'GET':
+        return Response({
+            'id': settings.id,
+            'root_music_path': settings.root_music_path,
+            'updated_at': settings.updated_at
+        }, status=status.HTTP_200_OK)
+    
+    elif request.method == 'PUT':
+        root_music_path = request.data.get('root_music_path')
+        
+        if not root_music_path:
+            return Response(
+                {'error': 'root_music_path is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        settings.root_music_path = root_music_path
+        settings.save()
+        
+        return Response({
+            'id': settings.id,
+            'root_music_path': settings.root_music_path,
+            'updated_at': settings.updated_at,
+            'message': 'Settings updated successfully'
+        }, status=status.HTTP_200_OK)
