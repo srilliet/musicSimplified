@@ -45,10 +45,7 @@ class Track(models.Model):
     album = models.CharField(max_length=500, blank=True, null=True)
     artist_name = models.CharField(max_length=500, blank=True, null=True)
     genre = models.CharField(max_length=200, blank=True, null=True)
-    download = models.IntegerField(default=0)
-    failed_download = models.IntegerField(default=0)
     relative_path = models.CharField(max_length=1000, blank=True, null=True)  # Relative path from root, e.g., "Zakk Wylde/book of shadows/between heaven & hell.mp3"
-    file_found = models.BooleanField(default=False)  # Track if file exists on disk
     
     class Meta:
         db_table = 'tracks'

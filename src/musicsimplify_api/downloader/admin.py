@@ -19,8 +19,8 @@ class SettingsAdmin(admin.ModelAdmin):
 
 @admin.register(Track)
 class TrackAdmin(admin.ModelAdmin):
-    list_display = ('id', 'track_name', 'artist_name', 'album', 'genre', 'file_found', 'download', 'failed_download')
-    list_filter = ('download', 'failed_download', 'file_found', 'artist_name', 'genre')
+    list_display = ('id', 'track_name', 'artist_name', 'album', 'genre', 'relative_path')
+    list_filter = ('artist_name', 'genre')
     search_fields = ('track_name', 'artist_name', 'album', 'genre', 'relative_path')
     ordering = ('id',)
     readonly_fields = ('relative_path',) if 'relative_path' in [f.name for f in Track._meta.get_fields()] else ()

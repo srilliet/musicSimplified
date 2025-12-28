@@ -112,8 +112,6 @@ def download_track_helper(track_id, download_dir=None):
     )
     
     if file_path:
-        track.download = 1
-        track.failed_download = 0
         track.save()
         return {'success': True, 'file_path': file_path, 'method': 'yt-dlp'}
     
@@ -125,13 +123,9 @@ def download_track_helper(track_id, download_dir=None):
     )
     
     if file_path:
-        track.download = 1
-        track.failed_download = 0
         track.save()
         return {'success': True, 'file_path': file_path, 'method': 'spotdl'}
     
-    track.failed_download = 1
-    track.save()
     return {'success': False, 'error': 'Download failed with both methods'}
 
 
@@ -166,13 +160,9 @@ def download_track(request):
 
 @api_view(['GET'])
 def get_tracks(request):
-    undownloaded_only = request.query_params.get('undownloaded_only', 'false').lower() == 'true'
     limit = request.query_params.get('limit', None)
     
     queryset = Track.objects.all()
-    
-    if undownloaded_only:
-        queryset = queryset.filter(download=0, failed_download=0)
     
     if limit:
         try:
@@ -189,10 +179,7 @@ def get_tracks(request):
             'album': track.album,
             'artist_name': track.artist_name,
             'genre': track.genre,
-            'download': track.download,
-            'failed_download': track.failed_download,
-            'relative_path': track.relative_path,
-            'file_found': track.file_found
+            'relative_path': track.relative_path
         })
     
     return Response({
@@ -203,9 +190,11 @@ def get_tracks(request):
 
 @api_view(['GET'])
 def get_undownloaded_count(request):
-    count = Track.objects.filter(download=0, failed_download=0).count()
+    # This endpoint is deprecated as download tracking fields have been removed
+    count = Track.objects.count()
     return Response({
-        'count': count
+        'count': count,
+        'message': 'Download tracking fields have been removed. This endpoint returns total track count.'
     }, status=status.HTTP_200_OK)
 
 

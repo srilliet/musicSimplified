@@ -629,9 +629,8 @@ def scan_music_directory(root_path):
             stats['tracks_found_in_db'] += 1
             
             # Update file location if not already set or if this is a better match
-            if not matching_track.file_found or score >= 0.9:
+            if not matching_track.relative_path or score >= 0.9:
                 matching_track.relative_path = relative_path
-                matching_track.file_found = True
                 
                 # Update artist/album if missing - prefer metadata tags over path
                 if not matching_track.artist_name:
@@ -656,9 +655,6 @@ def scan_music_directory(root_path):
                 artist_name=safe_unicode_string(final_artist) if final_artist else None,
                 album=safe_unicode_string(final_album) if final_album else None,
                 relative_path=safe_unicode_string(relative_path) if relative_path else None,
-                file_found=True,
-                download=0,
-                failed_download=0,
                 genre=safe_unicode_string(genre_from_tags) if genre_from_tags else None  # Use genre from tags if available
             )
             
