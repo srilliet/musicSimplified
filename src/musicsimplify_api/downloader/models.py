@@ -60,6 +60,8 @@ class NewTrack(models.Model):
     track_name = models.CharField(max_length=500)
     album = models.CharField(max_length=500, blank=True, null=True)
     genre = models.CharField(max_length=200, blank=True, null=True)
+    downloaded = models.BooleanField(default=False)  # Track if download was attempted
+    success = models.BooleanField(default=False)  # Track if download was successful
     
     class Meta:
         db_table = 'new_tracks'
