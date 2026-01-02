@@ -425,7 +425,18 @@ def download_artist_tracks(artist_name, download_dir=None, root_music_path=None)
     safe_print(f"\nDownload directory: {download_dir}")
     safe_print(f"Root music path: {root_music_path}")
     
-    # Find tracks in new_tracks table
+    # Find all tracks for this artist (for statistics)
+    all_artist_tracks = NewTrack.objects.filter(artist_name__iexact=artist_name)
+    total_artist_tracks = all_artist_tracks.count()
+    downloaded_count = all_artist_tracks.filter(downloaded=True).count()
+    undownloaded_count = all_artist_tracks.filter(downloaded=False).count()
+    
+    safe_print(f"\nArtist tracks summary:")
+    safe_print(f"  Total tracks for {artist_name}: {total_artist_tracks}")
+    safe_print(f"  Already downloaded: {downloaded_count}")
+    safe_print(f"  To download: {undownloaded_count}")
+    
+    # Find tracks in new_tracks table that haven't been downloaded yet
     tracks = NewTrack.objects.filter(
         artist_name__iexact=artist_name,
         downloaded=False  # Only download tracks that haven't been downloaded yet
@@ -433,10 +444,12 @@ def download_artist_tracks(artist_name, download_dir=None, root_music_path=None)
     
     if not tracks.exists():
         safe_print(f"\nNo undownloaded tracks found for artist: {artist_name}")
+        safe_print(f"All tracks for this artist are already marked as downloaded.")
         return {
             'total_tracks': 0,
             'successful': 0,
-            'failed': 0
+            'failed': 0,
+            'skipped': downloaded_count
         }
     
     total_tracks = tracks.count()
@@ -446,12 +459,20 @@ def download_artist_tracks(artist_name, download_dir=None, root_music_path=None)
     stats = {
         'total_tracks': total_tracks,
         'successful': 0,
-        'failed': 0
+        'failed': 0,
+        'skipped': downloaded_count
     }
     
     # Download each track
     for i, new_track in enumerate(tracks, 1):
         safe_print(f"[{i}/{total_tracks}] Processing: {new_track.track_name}")
+        
+        # Double-check that this track hasn't been downloaded (safety check)
+        new_track.refresh_from_db()
+        if new_track.downloaded:
+            safe_print(f"  ⚠ Skipping: Already marked as downloaded (may have been updated by another process)")
+            stats['skipped'] += 1
+            continue
         
         # Mark as downloaded (attempted)
         new_track.downloaded = True
@@ -516,9 +537,10 @@ def main():
     safe_print("Download Complete!")
     safe_print("=" * 60)
     safe_print(f"\nSummary:")
-    safe_print(f"  Total tracks: {stats['total_tracks']}")
+    safe_print(f"  Total tracks to download: {stats['total_tracks']}")
     safe_print(f"  Successful: {stats['successful']}")
     safe_print(f"  Failed: {stats['failed']}")
+    safe_print(f"  Skipped (already downloaded): {stats.get('skipped', 0)}")
     safe_print(f"\nTracks have been downloaded and added to the tracks table.")
     safe_print(f"new_tracks table has been updated with download status.")
 
