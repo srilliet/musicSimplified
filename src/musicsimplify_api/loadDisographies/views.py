@@ -1,10 +1,14 @@
 import os
 import time
+import logging
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 from downloader.models import Track, NewTrack
 from artistFetcher.views import fetch_artist_discography_helper
+import musicbrainzngs
+
+logger = logging.getLogger(__name__)
 
 
 @api_view(['POST'])
@@ -79,6 +83,69 @@ def load_all_discographies(request):
     }, status=status.HTTP_200_OK)
 
 
+def get_artist_genre_musicbrainz(artist_name):
+    """
+    Fetch genre for an artist from MusicBrainz API.
+    
+    Args:
+        artist_name (str): Name of the artist
+        
+    Returns:
+        str: Primary genre or None if not found
+    """
+    try:
+        musicbrainzngs.set_useragent("MusicSimplify", "1.0", "https://github.com/srilliet/musicSimplified")
+        
+        # Search for artist
+        result = musicbrainzngs.search_artists(artist=artist_name, limit=1)
+        time.sleep(1)  # Rate limit: 1 second between API calls
+        
+        if not result.get('artist-list'):
+            return None
+        
+        artist = result['artist-list'][0]
+        artist_id = artist.get('id')
+        
+        if not artist_id:
+            return None
+        
+        # Get detailed artist info with tags
+        time.sleep(1)  # Rate limit: 1 second between API calls
+        try:
+            artist_info = musicbrainzngs.get_artist_by_id(artist_id, includes=['tags'])
+            
+            if 'tag-list' in artist_info.get('artist', {}):
+                tags = artist_info['artist']['tag-list']
+                if isinstance(tags, list) and len(tags) > 0:
+                    # Filter out non-genre tags (country names, years, etc.)
+                    non_genre_keywords = ['american', 'british', 'canadian', 'german', 'french', 
+                                         'swedish', 'norwegian', 'japanese', 'australian', 'italian',
+                                         'spanish', 'dutch', 'polish', 'russian', 'brazilian',
+                                         'mexican', 'irish', 'scottish', 'welsh', 'english']
+                    
+                    genre_tags = []
+                    for tag in tags:
+                        if isinstance(tag, dict):
+                            tag_name = tag.get('name', '').lower()
+                            tag_count = int(tag.get('count', 0))
+                            # Skip if it's a non-genre keyword
+                            if tag_name not in non_genre_keywords:
+                                genre_tags.append((tag_name, tag_count))
+                    
+                    # Sort by count (descending) and return the most popular genre
+                    if genre_tags:
+                        genre_tags.sort(key=lambda x: x[1], reverse=True)
+                        return genre_tags[0][0].title()  # Return capitalized genre name
+        except Exception as e:
+            logger.debug(f"Error getting artist tags: {e}")
+            pass
+        
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching artist genre from MusicBrainz for {artist_name}: {e}")
+        return None
+
+
 @api_view(['POST'])
 def load_artist_discography(request):
     artist_name = request.data.get('artist_name')
@@ -90,41 +157,65 @@ def load_artist_discography(request):
         )
     
     try:
+        # Fetch artist genre first (will be used as default for tracks without genre)
+        logger.info(f"Fetching artist genre for: {artist_name}")
+        artist_genre = get_artist_genre_musicbrainz(artist_name)
+        logger.info(f"Artist genre for {artist_name}: {artist_genre}")
+        
+        # Fetch discography
         result = fetch_artist_discography_helper(artist_name)
         tracks_data = result.get('tracks', [])
         
         new_count = 0
         duplicate_count = 0
+        updated_count = 0
         
         for track_data in tracks_data:
             track_name = track_data.get('track_name', '')
             album = track_data.get('album', '')
             artist = track_data.get('artist_name', artist_name)
-            genre = track_data.get('genre', '')
+            track_genre = track_data.get('genre', '')
             
-            if track_name and not NewTrack.objects.filter(
-                artist_name=artist,
-                track_name=track_name
-            ).exists():
-                NewTrack.objects.create(
+            # Use track genre if available, otherwise use artist genre
+            final_genre = track_genre if track_genre else artist_genre
+            
+            if track_name:
+                # Check if track already exists
+                existing_track = NewTrack.objects.filter(
                     artist_name=artist,
-                    track_name=track_name,
-                    album=album if album else None,
-                    genre=genre if genre else None
-                )
-                new_count += 1
-            else:
-                duplicate_count += 1
+                    track_name=track_name
+                ).first()
+                
+                if existing_track:
+                    # Update genre if it's missing (NULL or empty) and we have one
+                    current_genre = existing_track.genre
+                    if (not current_genre or current_genre.strip() == '') and final_genre:
+                        existing_track.genre = final_genre
+                        existing_track.save()
+                        updated_count += 1
+                    duplicate_count += 1
+                else:
+                    # Create new track
+                    NewTrack.objects.create(
+                        artist_name=artist,
+                        track_name=track_name,
+                        album=album if album else None,
+                        genre=final_genre if final_genre else None
+                    )
+                    new_count += 1
         
         return Response({
             'message': 'Discography loaded successfully',
             'artist_name': artist_name,
             'tracks_found': len(tracks_data),
             'new_tracks': new_count,
-            'duplicates': duplicate_count
+            'duplicates': duplicate_count,
+            'updated': updated_count,
+            'artist_genre': artist_genre
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
+        logger.error(f"Error loading discography for {artist_name}: {e}")
         return Response(
             {'error': f'Error loading discography: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR

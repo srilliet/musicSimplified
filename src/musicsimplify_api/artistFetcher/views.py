@@ -5,6 +5,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 from ytmusicapi import YTMusic
+import musicbrainzngs
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,9 @@ def fetch_artist_discography_youtube_music(artist_name):
             logger.warning(f"No artist found on YouTube Music for: {artist_name}")
             return []
         
-        artist_id = search_results[0].get('browseId')
+        artist_result = search_results[0]
+        artist_id = artist_result.get('browseId')
+        
         if not artist_id:
             logger.warning(f"No browseId found for artist: {artist_name}")
             return []
@@ -29,7 +32,8 @@ def fetch_artist_discography_youtube_music(artist_name):
         seen_tracks = set()
         
         try:
-            artist_albums = ytmusic.get_artist_albums(browseId=artist_id, limit=100)
+            # New API requires channelId and params - browseId is the channel ID
+            artist_albums = ytmusic.get_artist_albums(channelId=artist_id, params=artist_id, limit=100)
             total_albums_processed = 0
             
             if artist_albums:
@@ -137,3 +141,44 @@ def fetch_artist_discography(request):
     
     result = fetch_artist_discography_helper(artist_name)
     return Response(result, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+def search_artists(request):
+    """
+    Search for artists using MusicBrainz API.
+    Returns a list of matching artists for autocomplete.
+    """
+    query = request.query_params.get('q', '').strip()
+    
+    if not query or len(query) < 2:
+        return Response({
+            'artists': []
+        }, status=status.HTTP_200_OK)
+    
+    try:
+        musicbrainzngs.set_useragent("MusicSimplify", "1.0", "https://github.com/srilliet/musicSimplified")
+        
+        # Search for artists
+        result = musicbrainzngs.search_artists(artist=query, limit=10)
+        
+        artists = []
+        if 'artist-list' in result:
+            for artist in result['artist-list']:
+                artists.append({
+                    'name': artist.get('name', ''),
+                    'mbid': artist.get('id', ''),
+                    'type': artist.get('type', ''),
+                    'country': artist.get('country', '')
+                })
+        
+        return Response({
+            'artists': artists
+        }, status=status.HTTP_200_OK)
+    
+    except Exception as e:
+        logger.error(f"Error searching artists: {e}")
+        return Response({
+            'artists': [],
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
