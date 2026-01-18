@@ -133,15 +133,52 @@ def load_artist_discography(request):
 
 @api_view(['GET'])
 def get_new_tracks(request):
-    artist_name = request.query_params.get('artist_name', None)
+    from django.db.models import Q
     
+    artist_name = request.query_params.get('artist_name', None)
+    search = request.query_params.get('search', None)
+    genre = request.query_params.get('genre', None)
+    page = request.query_params.get('page', 1)
+    page_size = request.query_params.get('page_size', 50)
+    
+    try:
+        page = int(page)
+        page_size = int(page_size)
+    except (ValueError, TypeError):
+        page = 1
+        page_size = 50
+    
+    # Limit page_size to reasonable range
+    page_size = min(max(page_size, 1), 100)
+    
+    # Start with base queryset - exclude downloaded tracks (success=True)
+    queryset = NewTrack.objects.filter(success=False).order_by('artist_name', 'track_name')
+    
+    # Apply filters
     if artist_name:
-        new_tracks = NewTrack.objects.filter(artist_name=artist_name).order_by('track_name')
-    else:
-        new_tracks = NewTrack.objects.all().order_by('artist_name', 'track_name')
+        queryset = queryset.filter(artist_name=artist_name)
+    
+    if search:
+        # Search in artist_name or track_name (case-insensitive)
+        queryset = queryset.filter(
+            Q(artist_name__icontains=search) | Q(track_name__icontains=search)
+        )
+    
+    if genre:
+        queryset = queryset.filter(genre=genre)
+    
+    # Calculate pagination
+    total_count = queryset.count()
+    total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
+    page = max(1, min(page, total_pages))  # Clamp page to valid range
+    
+    # Apply pagination
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated_tracks = queryset[start:end]
     
     tracks = []
-    for track in new_tracks:
+    for track in paginated_tracks:
         tracks.append({
             'id': track.id,
             'artist_name': track.artist_name,
@@ -151,6 +188,24 @@ def get_new_tracks(request):
         })
     
     return Response({
-        'count': len(tracks),
+        'count': total_count,
+        'page': page,
+        'page_size': page_size,
+        'total_pages': total_pages,
         'tracks': tracks
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+def get_genres(request):
+    """Get list of unique genres from new_tracks table (excluding downloaded tracks)"""
+    genres = NewTrack.objects.filter(
+        success=False,
+        genre__isnull=False
+    ).exclude(
+        genre=''
+    ).values_list('genre', flat=True).distinct().order_by('genre')
+    
+    return Response({
+        'genres': list(genres)
     }, status=status.HTTP_200_OK)

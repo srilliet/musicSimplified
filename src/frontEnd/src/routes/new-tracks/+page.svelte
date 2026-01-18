@@ -1,0 +1,226 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { getRecommendedTracks, getGenres } from '$lib/api/tracks';
+	import type { RecommendedTrack, PaginatedResponse } from '$lib/schema';
+	import Table from '$lib/components/ui/table.svelte';
+	import TableHeader from '$lib/components/ui/table-header.svelte';
+	import TableBody from '$lib/components/ui/table-body.svelte';
+	import TableRow from '$lib/components/ui/table-row.svelte';
+	import TableHead from '$lib/components/ui/table-head.svelte';
+	import TableCell from '$lib/components/ui/table-cell.svelte';
+	import Button from '$lib/components/ui/button.svelte';
+	import Card from '$lib/components/ui/card.svelte';
+	import CardHeader from '$lib/components/ui/card-header.svelte';
+	import CardTitle from '$lib/components/ui/card-title.svelte';
+	import CardContent from '$lib/components/ui/card-content.svelte';
+	import Input from '$lib/components/ui/input.svelte';
+	import Select from '$lib/components/ui/select.svelte';
+	import { ChevronLeft, ChevronRight, Search, X } from 'lucide-svelte';
+
+	let tracks = $state<RecommendedTrack[]>([]);
+	let currentPage = $state(1);
+	let pageSize = $state(50);
+	let totalPages = $state(1);
+	let totalCount = $state(0);
+	let loading = $state(false);
+	let error = $state<string | null>(null);
+	let searchQuery = $state('');
+	let selectedGenre = $state<string>('');
+	let genres = $state<string[]>([]);
+
+	async function loadTracks(page: number = 1) {
+		loading = true;
+		error = null;
+
+		try {
+			const data: PaginatedResponse = await getRecommendedTracks(page, pageSize, {
+				search: searchQuery.trim() || undefined,
+				genre: selectedGenre || undefined
+			});
+			tracks = data.tracks;
+			currentPage = data.page;
+			totalPages = data.total_pages;
+			totalCount = data.count;
+		} catch (err) {
+			if (err instanceof Error) {
+				error = err.message;
+				console.error('Error loading tracks:', err);
+			} else if (err instanceof TypeError && err.message.includes('fetch')) {
+				error = 'Network error: Unable to connect to API. Please check if the server is running.';
+				console.error('Network error:', err);
+			} else {
+				error = 'Failed to load tracks';
+				console.error('Unknown error:', err);
+			}
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function loadGenres() {
+		try {
+			genres = await getGenres();
+		} catch (err) {
+			console.error('Error loading genres:', err);
+		}
+	}
+
+	function goToPage(page: number) {
+		if (page >= 1 && page <= totalPages) {
+			loadTracks(page);
+		}
+	}
+
+	function previousPage() {
+		if (currentPage > 1) {
+			goToPage(currentPage - 1);
+		}
+	}
+
+	function nextPage() {
+		if (currentPage < totalPages) {
+			goToPage(currentPage + 1);
+		}
+	}
+
+	function handleSearchInput(e: Event) {
+		const target = e.target as HTMLInputElement;
+		searchQuery = target.value;
+		currentPage = 1; // Reset to first page on search
+		loadTracks(1);
+	}
+
+	function handleGenreChange(e: Event) {
+		const target = e.target as HTMLSelectElement;
+		selectedGenre = target.value;
+		currentPage = 1; // Reset to first page on filter
+		loadTracks(1);
+	}
+
+	function clearFilters() {
+		searchQuery = '';
+		selectedGenre = '';
+		currentPage = 1;
+		loadTracks(1);
+	}
+
+	onMount(() => {
+		loadGenres();
+		loadTracks();
+	});
+</script>
+
+<Card>
+	<CardHeader>
+		<CardTitle>Recommended Tracks</CardTitle>
+	</CardHeader>
+	<CardContent>
+		<!-- Filters -->
+		<div class="mb-4 space-y-3">
+			<div class="flex gap-3 items-end">
+				<!-- Search Input -->
+				<div class="flex-1 relative">
+					<Search class="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+					<Input
+						type="text"
+						placeholder="Search by artist or track name..."
+						class="pl-10"
+						value={searchQuery}
+						oninput={handleSearchInput}
+					/>
+				</div>
+
+				<!-- Genre Filter -->
+				<div class="w-48">
+					<Select value={selectedGenre} onchange={handleGenreChange}>
+						<option value="">All Genres</option>
+						{#each genres as genre}
+							<option value={genre}>{genre}</option>
+						{/each}
+					</Select>
+				</div>
+
+				<!-- Clear Filters Button -->
+				{#if searchQuery || selectedGenre}
+					<Button variant="outline" size="sm" onclick={clearFilters}>
+						<X class="h-4 w-4 mr-1" />
+						Clear
+					</Button>
+				{/if}
+			</div>
+		</div>
+
+		{#if error}
+			<div class="text-destructive mb-4">{error}</div>
+		{/if}
+
+		{#if loading}
+			<div class="text-center py-8">Loading tracks...</div>
+		{:else if tracks.length === 0}
+			<div class="text-center py-8 text-muted-foreground">
+				{#if searchQuery.trim() || selectedGenre}
+					No tracks found matching your filters
+				{:else}
+					No recommended tracks found
+				{/if}
+			</div>
+		{:else}
+			<div class="space-y-4">
+				<Table>
+					<TableHeader>
+						<TableRow>
+							<TableHead>Artist</TableHead>
+							<TableHead>Track Name</TableHead>
+							<TableHead>Album</TableHead>
+							<TableHead>Genre</TableHead>
+						</TableRow>
+					</TableHeader>
+					<TableBody>
+						{#each tracks as track}
+							<TableRow>
+								<TableCell class="font-medium">{track.artist_name}</TableCell>
+								<TableCell>{track.track_name}</TableCell>
+								<TableCell class="text-muted-foreground">
+									{track.album || '-'}
+								</TableCell>
+								<TableCell class="text-muted-foreground">
+									{track.genre || '-'}
+								</TableCell>
+							</TableRow>
+						{/each}
+					</TableBody>
+				</Table>
+
+				<!-- Pagination Controls -->
+				<div class="flex items-center justify-between">
+					<div class="text-sm text-muted-foreground">
+						Showing {((currentPage - 1) * pageSize) + 1} to {Math.min(currentPage * pageSize, totalCount)} of {totalCount} tracks
+					</div>
+					<div class="flex items-center gap-2">
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={previousPage}
+							disabled={currentPage === 1 || loading}
+						>
+							<ChevronLeft class="h-4 w-4" />
+							Previous
+						</Button>
+						<div class="text-sm">
+							Page {currentPage} of {totalPages}
+						</div>
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={nextPage}
+							disabled={currentPage === totalPages || loading}
+						>
+							Next
+							<ChevronRight class="h-4 w-4" />
+						</Button>
+					</div>
+				</div>
+			</div>
+		{/if}
+	</CardContent>
+</Card>
