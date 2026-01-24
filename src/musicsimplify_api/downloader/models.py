@@ -46,6 +46,8 @@ class Track(models.Model):
     artist_name = models.CharField(max_length=500, blank=True, null=True)
     genre = models.CharField(max_length=200, blank=True, null=True)
     relative_path = models.CharField(max_length=1000, blank=True, null=True)  # Relative path from root, e.g., "Zakk Wylde/book of shadows/between heaven & hell.mp3"
+    playcount = models.IntegerField(default=0)
+    skipcount = models.IntegerField(default=0)
     
     class Meta:
         db_table = 'tracks'

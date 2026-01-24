@@ -6,6 +6,11 @@
 </script>
 
 <div class="space-y-6">
+	<!-- Page Header -->
+	<div class="mb-4">
+		<h1 class="text-3xl font-bold">Home</h1>
+	</div>
+
 	<Card>
 		<CardHeader>
 			<CardTitle>Welcome to MusicSimplify</CardTitle>

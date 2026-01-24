@@ -160,31 +160,97 @@ def download_track(request):
 
 @api_view(['GET'])
 def get_tracks(request):
-    limit = request.query_params.get('limit', None)
+    from django.db.models import Q
     
-    queryset = Track.objects.all()
+    artist_name = request.query_params.get('artist_name', None)
+    search = request.query_params.get('search', None)
+    genre = request.query_params.get('genre', None)
+    page = request.query_params.get('page', 1)
+    page_size = request.query_params.get('page_size', 100)
     
-    if limit:
-        try:
-            limit = int(limit)
-            queryset = queryset[:limit]
-        except ValueError:
-            pass
+    try:
+        page = int(page)
+        page_size = int(page_size)
+    except (ValueError, TypeError):
+        page = 1
+        page_size = 100
+    
+    # Limit page_size to reasonable range
+    page_size = min(max(page_size, 1), 100)
+    
+    # Start with base queryset
+    queryset = Track.objects.all().order_by('artist_name', 'track_name')
+    
+    # Apply filters
+    if artist_name:
+        queryset = queryset.filter(artist_name=artist_name)
+    
+    if search:
+        # Search in artist_name or track_name (case-insensitive)
+        queryset = queryset.filter(
+            Q(artist_name__icontains=search) | Q(track_name__icontains=search)
+        )
+    
+    if genre:
+        queryset = queryset.filter(genre=genre)
+    
+    # Calculate pagination
+    total_count = queryset.count()
+    total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
+    page = max(1, min(page, total_pages))  # Clamp page to valid range
+    
+    # Apply pagination
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated_tracks = queryset[start:end]
     
     tracks = []
-    for track in queryset:
+    for track in paginated_tracks:
         tracks.append({
             'id': track.id,
+            'artist_name': track.artist_name,
             'track_name': track.track_name,
             'album': track.album,
-            'artist_name': track.artist_name,
             'genre': track.genre,
-            'relative_path': track.relative_path
+            'relative_path': track.relative_path,
+            'playcount': track.playcount,
+            'skipcount': track.skipcount
         })
     
     return Response({
-        'count': len(tracks),
+        'count': total_count,
+        'page': page,
+        'page_size': page_size,
+        'total_pages': total_pages,
         'tracks': tracks
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+def get_existing_tracks_genres(request):
+    """Get list of unique genres from tracks table"""
+    genres = Track.objects.filter(
+        genre__isnull=False
+    ).exclude(
+        genre=''
+    ).values_list('genre', flat=True).distinct().order_by('genre')
+    
+    return Response({
+        'genres': list(genres)
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+def get_existing_tracks_artists(request):
+    """Get list of unique artists from tracks table"""
+    artists = Track.objects.filter(
+        artist_name__isnull=False
+    ).exclude(
+        artist_name=''
+    ).values_list('artist_name', flat=True).distinct().order_by('artist_name')
+    
+    return Response({
+        'artists': list(artists)
     }, status=status.HTTP_200_OK)
 
 
