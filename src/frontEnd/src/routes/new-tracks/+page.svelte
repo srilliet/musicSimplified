@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getRecommendedTracks, getGenres, loadArtistDiscography } from '$lib/api/tracks';
+	import { getRecommendedTracks, getGenres, getArtists, loadArtistDiscography, downloadSelectedTracks } from '$lib/api/tracks';
 	import type { RecommendedTrack, PaginatedResponse } from '$lib/schema';
 	import Table from '$lib/components/ui/table.svelte';
 	import TableHeader from '$lib/components/ui/table-header.svelte';
@@ -15,20 +15,25 @@
 	import CardContent from '$lib/components/ui/card-content.svelte';
 	import Input from '$lib/components/ui/input.svelte';
 	import Select from '$lib/components/ui/select.svelte';
+	import Checkbox from '$lib/components/ui/checkbox.svelte';
 	import { ChevronLeft, ChevronRight, Search, X } from 'lucide-svelte';
 
 	let tracks = $state<RecommendedTrack[]>([]);
 	let currentPage = $state(1);
-	let pageSize = $state(50);
+	let pageSize = $state(100);
 	let totalPages = $state(1);
 	let totalCount = $state(0);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 	let searchQuery = $state('');
 	let selectedGenre = $state<string>('');
+	let selectedArtist = $state<string>('');
 	let genres = $state<string[]>([]);
+	let artists = $state<string[]>([]);
 	let artistInput = $state('');
 	let loadingArtist = $state(false);
+	let selectedTrackIds = $state<Set<number>>(new Set());
+	let downloadingTracks = $state(false);
 	let artistStatus = $state<{
 		show: boolean;
 		message: string;
@@ -58,12 +63,15 @@
 		try {
 			const data: PaginatedResponse = await getRecommendedTracks(page, pageSize, {
 				search: searchQuery.trim() || undefined,
-				genre: selectedGenre || undefined
+				genre: selectedGenre || undefined,
+				artistName: selectedArtist || undefined
 			});
 			tracks = data.tracks;
 			currentPage = data.page;
 			totalPages = data.total_pages;
 			totalCount = data.count;
+			// Clear selections when tracks change (new page or filter)
+			selectedTrackIds = new Set();
 		} catch (err) {
 			if (err instanceof Error) {
 				error = err.message;
@@ -85,6 +93,14 @@
 			genres = await getGenres();
 		} catch (err) {
 			console.error('Error loading genres:', err);
+		}
+	}
+
+	async function loadArtists() {
+		try {
+			artists = await getArtists();
+		} catch (err) {
+			console.error('Error loading artists:', err);
 		}
 	}
 
@@ -120,9 +136,17 @@
 		loadTracks(1);
 	}
 
+	function handleArtistChange(e: Event) {
+		const target = e.target as HTMLSelectElement;
+		selectedArtist = target.value;
+		currentPage = 1; // Reset to first page on filter
+		loadTracks(1);
+	}
+
 	function clearFilters() {
 		searchQuery = '';
 		selectedGenre = '';
+		selectedArtist = '';
 		currentPage = 1;
 		loadTracks(1);
 	}
@@ -130,6 +154,51 @@
 	function handleArtistInput(e: Event) {
 		const target = e.target as HTMLInputElement;
 		artistInput = target.value;
+	}
+
+	function toggleTrackSelection(trackId: number) {
+		if (selectedTrackIds.has(trackId)) {
+			selectedTrackIds.delete(trackId);
+		} else {
+			selectedTrackIds.add(trackId);
+		}
+		selectedTrackIds = new Set(selectedTrackIds); // Trigger reactivity
+	}
+
+	function toggleSelectAll() {
+		if (selectedTrackIds.size === tracks.length) {
+			selectedTrackIds = new Set();
+		} else {
+			selectedTrackIds = new Set(tracks.map(track => track.id));
+		}
+	}
+
+	let allSelected = $derived(tracks.length > 0 && selectedTrackIds.size === tracks.length);
+
+	async function handleDownloadSelected() {
+		if (selectedTrackIds.size === 0) {
+			return;
+		}
+
+		downloadingTracks = true;
+		try {
+			const trackIdsArray = Array.from(selectedTrackIds);
+			const result = await downloadSelectedTracks(trackIdsArray);
+			
+			// Show success message
+			alert(`Download complete: ${result.successful} successful, ${result.failed} failed`);
+			
+			// Clear selections
+			selectedTrackIds = new Set();
+			
+			// Reload tracks to update the list (downloaded tracks will be filtered out)
+			await loadTracks(currentPage);
+		} catch (err) {
+			console.error('Error downloading tracks:', err);
+			alert(err instanceof Error ? err.message : 'Failed to download tracks');
+		} finally {
+			downloadingTracks = false;
+		}
 	}
 
 	async function handleAddSongs() {
@@ -205,6 +274,7 @@
 
 	onMount(() => {
 		loadGenres();
+		loadArtists();
 		loadTracks();
 	});
 </script>
@@ -312,6 +382,20 @@
 						</select>
 					</div>
 
+					<!-- Artist Filter -->
+					<div class="w-48">
+						<select
+							class="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+							bind:value={selectedArtist}
+							onchange={handleArtistChange}
+						>
+							<option value="">All Artists</option>
+							{#each artists as artist}
+								<option value={artist}>{artist}</option>
+							{/each}
+						</select>
+					</div>
+
 					<!-- Clear Filters Button -->
 					<button
 						type="button"
@@ -320,11 +404,20 @@
 							console.log('Clear filters clicked');
 							clearFilters();
 						}}
-						disabled={!searchQuery.trim() && !selectedGenre}
+						disabled={!searchQuery.trim() && !selectedGenre && !selectedArtist}
 					>
 						<X class="h-4 w-4 mr-1" />
 						Clear
 					</button>
+				</div>
+				<!-- Download Selected Button -->
+				<div class="flex justify-start">
+					<Button
+						onclick={handleDownloadSelected}
+						disabled={selectedTrackIds.size === 0 || downloadingTracks}
+					>
+						{downloadingTracks ? 'Downloading...' : `Download Selected Songs (${selectedTrackIds.size})`}
+					</Button>
 				</div>
 			</div>
 
@@ -339,7 +432,7 @@
 			{:else if tracks.length === 0}
 				<div class="flex-1 flex items-center justify-center">
 					<div class="text-center text-muted-foreground">
-						{#if searchQuery.trim() || selectedGenre}
+						{#if searchQuery.trim() || selectedGenre || selectedArtist}
 							No tracks found matching your filters
 						{:else}
 							No recommended tracks found
@@ -352,6 +445,12 @@
 						<Table class="border-2 border-white">
 							<TableHeader>
 								<TableRow>
+									<TableHead class="w-12">
+										<Checkbox
+											checked={allSelected}
+											onCheckedChange={() => toggleSelectAll()}
+										/>
+									</TableHead>
 									<TableHead>Artist</TableHead>
 									<TableHead>Track Name</TableHead>
 									<TableHead>Album</TableHead>
@@ -361,6 +460,12 @@
 							<TableBody>
 								{#each tracks as track}
 									<TableRow>
+										<TableCell>
+											<Checkbox
+												checked={selectedTrackIds.has(track.id)}
+												onCheckedChange={() => toggleTrackSelection(track.id)}
+											/>
+										</TableCell>
 										<TableCell class="font-medium">{track.artist_name}</TableCell>
 										<TableCell>{track.track_name}</TableCell>
 										<TableCell class="text-muted-foreground">

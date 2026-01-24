@@ -300,3 +300,102 @@ def get_genres(request):
     return Response({
         'genres': list(genres)
     }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+def get_artists(request):
+    """Get list of unique artists from new_tracks table (excluding downloaded tracks)"""
+    artists = NewTrack.objects.filter(
+        success=False,
+        artist_name__isnull=False
+    ).exclude(
+        artist_name=''
+    ).values_list('artist_name', flat=True).distinct().order_by('artist_name')
+    
+    return Response({
+        'artists': list(artists)
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+def download_selected_tracks(request):
+    """Download multiple NewTrack objects by their IDs"""
+    from downloader.views import download_with_ytdlp, download_with_spotdl
+    from downloader.models import Settings
+    import os
+    
+    track_ids = request.data.get('track_ids', [])
+    
+    if not track_ids or not isinstance(track_ids, list):
+        return Response(
+            {'error': 'track_ids array is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Get download directory from settings
+    settings = Settings.get_settings()
+    download_dir = settings.root_music_path
+    
+    successful = 0
+    failed = 0
+    results = []
+    
+    for track_id in track_ids:
+        try:
+            new_track = NewTrack.objects.get(id=track_id, success=False)
+        except NewTrack.DoesNotExist:
+            failed += 1
+            results.append({
+                'track_id': track_id,
+                'success': False,
+                'error': 'Track not found or already downloaded'
+            })
+            continue
+        
+        # Mark as attempted
+        new_track.downloaded = True
+        new_track.save()
+        
+        # Try downloading
+        file_path = None
+        
+        # Try yt-dlp first
+        file_path = download_with_ytdlp(
+            new_track.track_name,
+            new_track.artist_name,
+            new_track.album,
+            download_dir
+        )
+        
+        # If yt-dlp fails, try spotdl
+        if not file_path:
+            file_path = download_with_spotdl(
+                new_track.track_name,
+                new_track.artist_name,
+                new_track.album,
+                download_dir
+            )
+        
+        if file_path:
+            new_track.success = True
+            new_track.save()
+            successful += 1
+            results.append({
+                'track_id': track_id,
+                'success': True,
+                'file_path': file_path
+            })
+        else:
+            failed += 1
+            results.append({
+                'track_id': track_id,
+                'success': False,
+                'error': 'Download failed with both methods'
+            })
+    
+    return Response({
+        'message': f'Downloaded {successful} tracks, {failed} failed',
+        'successful': successful,
+        'failed': failed,
+        'results': results
+    }, status=status.HTTP_200_OK)

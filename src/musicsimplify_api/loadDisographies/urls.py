@@ -6,5 +6,7 @@ urlpatterns = [
     path('load-artist/', views.load_artist_discography, name='load_artist_discography'),
     path('new-tracks/', views.get_new_tracks, name='get_new_tracks'),
     path('genres/', views.get_genres, name='get_genres'),
+    path('artists/', views.get_artists, name='get_artists'),
+    path('download-selected/', views.download_selected_tracks, name='download_selected_tracks'),
 ]
 
