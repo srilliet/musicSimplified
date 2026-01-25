@@ -120,3 +120,51 @@ class NewTrack(models.Model):
     
     def __str__(self):
         return f"{self.artist_name} - {self.track_name}"
+
+
+class Playlist(models.Model):
+    """
+    User-created playlists.
+    Each user can create multiple playlists with custom names.
+    """
+    id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='playlists')
+    name = models.CharField(max_length=200, help_text='Playlist name')
+    description = models.TextField(blank=True, null=True, help_text='Optional playlist description')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'playlists'
+        indexes = [
+            models.Index(fields=['user']),
+            models.Index(fields=['user', 'created_at']),
+        ]
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.name}"
+
+
+class PlaylistTrack(models.Model):
+    """
+    Links tracks to playlists (many-to-many relationship).
+    Maintains track order within each playlist.
+    """
+    id = models.AutoField(primary_key=True)
+    playlist = models.ForeignKey(Playlist, on_delete=models.CASCADE, related_name='playlist_tracks')
+    track = models.ForeignKey(Track, on_delete=models.CASCADE, related_name='playlist_tracks')
+    position = models.IntegerField(default=0, help_text='Track position/order in playlist')
+    added_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'playlist_tracks'
+        unique_together = [['playlist', 'track']]  # Prevent duplicate tracks in same playlist
+        indexes = [
+            models.Index(fields=['playlist', 'position']),
+            models.Index(fields=['playlist', 'track']),
+        ]
+        ordering = ['playlist', 'position', 'added_at']
+    
+    def __str__(self):
+        return f"{self.playlist.name} - {self.track.track_name} (Position: {self.position})"

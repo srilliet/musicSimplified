@@ -1,6 +1,7 @@
 from django.urls import path
 from . import views
 from . import user_tracks_views
+from . import playlist_views
 
 urlpatterns = [
     path('download/', views.download_track, name='download_track'),
@@ -19,5 +20,9 @@ urlpatterns = [
     path('user-tracks/removed/', user_tracks_views.get_removed_tracks, name='get_removed_tracks'),
     path('user-tracks/restore-all/', user_tracks_views.restore_all_tracks, name='restore_all_tracks'),
     path('user-tracks/<int:track_id>/update/', user_tracks_views.update_user_track, name='update_user_track'),
+    # Playlist endpoints
+    path('playlists/', playlist_views.get_playlists, name='get_playlists'),
+    path('playlists/create/', playlist_views.create_playlist, name='create_playlist'),
+    path('playlists/<int:playlist_id>/delete/', playlist_views.delete_playlist, name='delete_playlist'),
 ]
 
