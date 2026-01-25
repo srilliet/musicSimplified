@@ -1,6 +1,7 @@
 from django.db import models
 from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 
 class Settings(models.Model):
@@ -65,6 +66,16 @@ class UserTrack(models.Model):
     is_removed = models.BooleanField(default=False)  # True if user removed from their library
     playcount = models.IntegerField(default=0)  # User-specific play count
     skipcount = models.IntegerField(default=0)  # User-specific skip count
+    # Dynamic playlist fields
+    rating = models.IntegerField(
+        null=True, 
+        blank=True, 
+        help_text='User rating 1-5 stars',
+        validators=[MinValueValidator(1), MaxValueValidator(5)]
+    )  # 1-5 rating
+    favorite = models.BooleanField(default=False)  # Favorite/liked flag
+    last_played = models.DateTimeField(null=True, blank=True)  # Last time track was played
+    play_streak = models.IntegerField(default=0)  # Current consecutive plays without skip
     added_at = models.DateTimeField(auto_now_add=True)
     removed_at = models.DateTimeField(null=True, blank=True)
     
@@ -74,7 +85,22 @@ class UserTrack(models.Model):
         indexes = [
             models.Index(fields=['user', 'is_removed']),
             models.Index(fields=['user', 'track']),
+            models.Index(fields=['user', 'favorite']),
+            models.Index(fields=['user', 'rating']),
+            models.Index(fields=['user', 'last_played']),
         ]
+    
+    @property
+    def skip_ratio(self):
+        """Calculate skip ratio for dynamic playlists (0.0 to 1.0)"""
+        if self.playcount == 0:
+            return 0.0
+        return round(self.skipcount / self.playcount, 2)
+    
+    def clean(self):
+        """Validate rating is between 1-5 if provided"""
+        if self.rating is not None and (self.rating < 1 or self.rating > 5):
+            raise ValidationError({'rating': 'Rating must be between 1 and 5'})
     
     def __str__(self):
         return f"{self.user.username} - {self.track.track_name}"

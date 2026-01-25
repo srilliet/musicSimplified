@@ -125,6 +125,10 @@ def get_user_tracks(request):
             'relative_path': track.relative_path,
             'playcount': user_track.playcount,
             'skipcount': user_track.skipcount,
+            'rating': user_track.rating,
+            'favorite': user_track.favorite,
+            'last_played': user_track.last_played.isoformat() if user_track.last_played else None,
+            'play_streak': user_track.play_streak,
         })
     
     return Response({
@@ -237,4 +241,135 @@ def get_user_tracks_artists(request):
     
     return Response({
         'artists': list(artists)
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+def get_removed_tracks(request):
+    """Get tracks that user has removed from their library"""
+    from django.db.models import Q
+    
+    user = request.user
+    
+    if not user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    # Get query parameters
+    search = request.query_params.get('search', None)
+    page = request.query_params.get('page', 1)
+    page_size = request.query_params.get('page_size', 100)
+    
+    try:
+        page = int(page)
+        page_size = int(page_size)
+    except (ValueError, TypeError):
+        page = 1
+        page_size = 100
+    
+    # Limit page_size to reasonable range
+    page_size = min(max(page_size, 1), 100)
+    
+    # Get removed tracks
+    queryset = UserTrack.objects.filter(
+        user=user,
+        is_removed=True
+    ).select_related('track').order_by('-removed_at', 'track__artist_name', 'track__track_name')
+    
+    # Apply search filter
+    if search:
+        queryset = queryset.filter(
+            Q(track__artist_name__icontains=search) | Q(track__track_name__icontains=search)
+        )
+    
+    # Calculate pagination
+    total_count = queryset.count()
+    total_pages = (total_count + page_size - 1) // page_size
+    page = max(1, min(page, total_pages))
+    
+    # Apply pagination
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated_user_tracks = queryset[start:end]
+    
+    tracks = []
+    for user_track in paginated_user_tracks:
+        track = user_track.track
+        tracks.append({
+            'id': track.id,
+            'artist_name': track.artist_name,
+            'track_name': track.track_name,
+            'album': track.album,
+            'genre': track.genre,
+            'relative_path': track.relative_path,
+            'removed_at': user_track.removed_at.isoformat() if user_track.removed_at else None,
+        })
+    
+    return Response({
+        'count': total_count,
+        'page': page,
+        'page_size': page_size,
+        'total_pages': total_pages,
+        'tracks': tracks
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+def restore_all_tracks(request):
+    """Restore all removed tracks to user's library"""
+    user = request.user
+    
+    if not user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    # Get all removed tracks for this user
+    removed_tracks = UserTrack.objects.filter(user=user, is_removed=True)
+    count = removed_tracks.count()
+    
+    # Restore all tracks
+    removed_tracks.update(is_removed=False, removed_at=None)
+    
+    return Response({
+        'message': f'Restored {count} tracks to library',
+        'count': count
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['PUT', 'PATCH'])
+def update_user_track(request, track_id):
+    """Update user track fields (rating, favorite, etc.)"""
+    user = request.user
+    
+    if not user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    try:
+        track = Track.objects.get(id=track_id)
+    except Track.DoesNotExist:
+        return Response({'error': 'Track not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    # Get or create UserTrack entry
+    user_track, created = UserTrack.objects.get_or_create(
+        user=user,
+        track=track,
+        defaults={'is_removed': False}
+    )
+    
+    # Update fields if provided
+    if 'rating' in request.data:
+        rating = request.data.get('rating')
+        if rating is None or (isinstance(rating, int) and 1 <= rating <= 5):
+            user_track.rating = rating
+        else:
+            return Response({'error': 'Rating must be between 1 and 5'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if 'favorite' in request.data:
+        user_track.favorite = bool(request.data.get('favorite'))
+    
+    user_track.save()
+    
+    return Response({
+        'message': 'Track updated successfully',
+        'track_id': track_id,
+        'rating': user_track.rating,
+        'favorite': user_track.favorite
     }, status=status.HTTP_200_OK)

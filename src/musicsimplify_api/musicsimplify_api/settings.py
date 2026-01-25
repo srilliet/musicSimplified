@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
+    'django_extensions',  # For HTTPS support in development
     'authentication',
     'artistFetcher',
     'downloader',
@@ -186,3 +187,13 @@ LOGGING = {
 # This is the base directory where all music files are stored
 # Individual track paths are stored as relative_path in the Track model
 ROOT_MUSIC_PATH = '/home/stephen/Music'
+
+# SSL certificates for HTTPS in development
+# Paths relative to BASE_DIR (musicsimplify_api directory)
+SSL_CERTIFICATE = BASE_DIR.parent / 'frontEnd' / 'cert.pem'
+SSL_PRIVATE_KEY = BASE_DIR.parent / 'frontEnd' / 'key.pem'
+
+# SSL certificates for HTTPS in development
+# Paths relative to BASE_DIR (musicsimplify_api directory)
+SSL_CERTIFICATE = BASE_DIR.parent / 'frontEnd' / 'cert.pem'
+SSL_PRIVATE_KEY = BASE_DIR.parent / 'frontEnd' / 'key.pem'

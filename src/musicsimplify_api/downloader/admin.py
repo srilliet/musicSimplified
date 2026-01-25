@@ -58,8 +58,8 @@ class NewTrackAdmin(admin.ModelAdmin):
 
 @admin.register(UserTrack)
 class UserTrackAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user', 'track', 'is_removed', 'playcount', 'skipcount', 'added_at')
-    list_filter = ('is_removed', 'user', 'added_at')
+    list_display = ('id', 'user', 'track', 'is_removed', 'favorite', 'rating', 'playcount', 'skipcount', 'play_streak', 'last_played', 'added_at')
+    list_filter = ('is_removed', 'favorite', 'rating', 'user', 'added_at', 'last_played')
     search_fields = ('user__username', 'track__track_name', 'track__artist_name')
     ordering = ('-added_at',)
     readonly_fields = ('added_at',)
@@ -72,7 +72,11 @@ class UserTrackAdmin(admin.ModelAdmin):
             'fields': ('is_removed', 'removed_at')
         }),
         ('Playback Statistics', {
-            'fields': ('playcount', 'skipcount')
+            'fields': ('playcount', 'skipcount', 'play_streak', 'last_played'),
+            'description': 'Skip ratio is calculated as skipcount/playcount (read-only, calculated property)'
+        }),
+        ('Dynamic Playlist Fields', {
+            'fields': ('rating', 'favorite')
         }),
         ('Timestamps', {
             'fields': ('added_at',)

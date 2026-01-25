@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getUserTracks, getUserTracksGenres, getUserTracksArtists, removeTrackFromLibrary, initializeUserLibrary } from '$lib/api/tracks';
+	import { getUserTracks, getUserTracksGenres, getUserTracksArtists, removeTrackFromLibrary, initializeUserLibrary, getRemovedTracks, restoreTrackToLibrary, restoreAllTracks, updateUserTrack, type RemovedTrack } from '$lib/api/tracks';
 	import type { UserTrack, UserTracksPaginatedResponse } from '$lib/schema';
 	import Table from '$lib/components/ui/table.svelte';
 	import TableHeader from '$lib/components/ui/table-header.svelte';
@@ -14,7 +14,7 @@
 	import CardTitle from '$lib/components/ui/card-title.svelte';
 	import CardContent from '$lib/components/ui/card-content.svelte';
 	import Checkbox from '$lib/components/ui/checkbox.svelte';
-	import { ChevronLeft, ChevronRight, Search, X, Trash2 } from 'lucide-svelte';
+	import { ChevronLeft, ChevronRight, Search, X, Trash2, RotateCcw, Star, Heart } from 'lucide-svelte';
 
 	let tracks = $state<UserTrack[]>([]);
 	let currentPage = $state(1);
@@ -30,6 +30,15 @@
 	let artists = $state<string[]>([]);
 	let selectedTrackIds = $state<Set<number>>(new Set());
 	let removingTrackId = $state<number | null>(null);
+	let showRestoreDialog = $state(false);
+	let removedTracks = $state<RemovedTrack[]>([]);
+	let removedTracksPage = $state(1);
+	let removedTracksTotalPages = $state(1);
+	let removedTracksTotalCount = $state(0);
+	let removedTracksLoading = $state(false);
+	let removedTracksSearch = $state('');
+	let restoringTrackId = $state<number | null>(null);
+	let restoringAll = $state(false);
 
 	async function loadTracks(page: number = 1) {
 		loading = true;
@@ -96,6 +105,127 @@
 		} finally {
 			removingTrackId = null;
 		}
+	}
+
+	async function loadRemovedTracks(page: number = 1) {
+		removedTracksLoading = true;
+		try {
+			const data = await getRemovedTracks(page, 50, removedTracksSearch.trim() || undefined);
+			removedTracks = data.tracks;
+			removedTracksPage = data.page;
+			removedTracksTotalPages = data.total_pages;
+			removedTracksTotalCount = data.count;
+		} catch (err) {
+			if (err instanceof Error) {
+				error = err.message;
+			} else {
+				error = 'Failed to load removed tracks';
+			}
+			console.error('Error loading removed tracks:', err);
+		} finally {
+			removedTracksLoading = false;
+		}
+	}
+
+	async function handleRestoreTrack(trackId: number) {
+		restoringTrackId = trackId;
+		try {
+			await restoreTrackToLibrary(trackId);
+			await loadRemovedTracks(removedTracksPage);
+			await loadTracks(currentPage);
+			await loadGenres();
+			await loadArtists();
+		} catch (err) {
+			if (err instanceof Error) {
+				error = err.message;
+			} else {
+				error = 'Failed to restore track';
+			}
+			console.error('Error restoring track:', err);
+		} finally {
+			restoringTrackId = null;
+		}
+	}
+
+	async function handleRestoreAll() {
+		if (!confirm(`Restore all ${removedTracksTotalCount} removed tracks to your library?`)) {
+			return;
+		}
+
+		restoringAll = true;
+		try {
+			const result = await restoreAllTracks();
+			await loadRemovedTracks(1);
+			await loadTracks(currentPage);
+			await loadGenres();
+			await loadArtists();
+			alert(result.message);
+		} catch (err) {
+			if (err instanceof Error) {
+				error = err.message;
+			} else {
+				error = 'Failed to restore all tracks';
+			}
+			console.error('Error restoring all tracks:', err);
+		} finally {
+			restoringAll = false;
+		}
+	}
+
+	async function handleRatingChange(trackId: number, rating: number) {
+		try {
+			// If clicking the same rating, remove it (set to null)
+			const track = tracks.find((t) => t.id === trackId);
+			const newRating = track?.rating === rating ? null : rating;
+			
+			await updateUserTrack(trackId, { rating: newRating });
+			await loadTracks(currentPage);
+		} catch (err) {
+			if (err instanceof Error) {
+				error = err.message;
+			} else {
+				error = 'Failed to update rating';
+			}
+			console.error('Error updating rating:', err);
+		}
+	}
+
+	async function handleFavoriteToggle(trackId: number) {
+		try {
+			const track = tracks.find((t) => t.id === trackId);
+			const newFavorite = !track?.favorite;
+			
+			await updateUserTrack(trackId, { favorite: newFavorite });
+			await loadTracks(currentPage);
+		} catch (err) {
+			if (err instanceof Error) {
+				error = err.message;
+			} else {
+				error = 'Failed to update favorite';
+			}
+			console.error('Error updating favorite:', err);
+		}
+	}
+
+	function openRestoreDialog() {
+		showRestoreDialog = true;
+		removedTracksSearch = '';
+		loadRemovedTracks(1);
+	}
+
+	function closeRestoreDialog() {
+		showRestoreDialog = false;
+		removedTracks = [];
+		removedTracksSearch = '';
+	}
+
+	function handleRemovedTracksSearchInput(e: Event) {
+		const target = e.target as HTMLInputElement;
+		removedTracksSearch = target.value;
+		clearTimeout((handleRemovedTracksSearchInput as any).timeout);
+		(handleRemovedTracksSearchInput as any).timeout = setTimeout(() => {
+			loadRemovedTracks(1);
+		}, 500);
 	}
 
 	function goToPage(page: number) {
@@ -183,7 +313,13 @@
 	<!-- My Library Card -->
 	<Card class="border-2 border-white flex-1 flex flex-col min-h-0 overflow-hidden">
 		<CardHeader class="flex-shrink-0 pb-3">
-			<CardTitle>My Library</CardTitle>
+			<div class="flex items-center justify-between">
+				<CardTitle>My Library</CardTitle>
+				<Button variant="outline" onclick={openRestoreDialog}>
+					<RotateCcw class="h-4 w-4 mr-2" />
+					Restore from All Tracks
+				</Button>
+			</div>
 		</CardHeader>
 		<CardContent class="flex-1 flex flex-col min-h-0 overflow-hidden">
 			<!-- Filters -->
@@ -279,8 +415,11 @@
 									<TableHead>Track Name</TableHead>
 									<TableHead>Album</TableHead>
 									<TableHead>Genre</TableHead>
+									<TableHead>Rating</TableHead>
+									<TableHead>Favorite</TableHead>
 									<TableHead>Play Count</TableHead>
 									<TableHead>Skip Count</TableHead>
+									<TableHead>Play Streak</TableHead>
 									<TableHead class="w-24">Actions</TableHead>
 								</TableRow>
 							</TableHeader>
@@ -301,11 +440,44 @@
 										<TableCell class="text-muted-foreground">
 											{track.genre || '-'}
 										</TableCell>
+										<TableCell>
+											<div class="flex items-center gap-1">
+												{#each [1, 2, 3, 4, 5] as star}
+													<button
+														type="button"
+														class="p-0 border-0 bg-transparent cursor-pointer hover:opacity-70"
+														onclick={() => handleRatingChange(track.id, star)}
+													>
+														<Star
+															class="h-4 w-4 {track.rating && track.rating >= star
+																? 'fill-yellow-400 text-yellow-400'
+																: 'text-muted-foreground'}"
+														/>
+													</button>
+												{/each}
+											</div>
+										</TableCell>
+										<TableCell>
+											<button
+												type="button"
+												class="p-1 border-0 bg-transparent cursor-pointer hover:opacity-70"
+												onclick={() => handleFavoriteToggle(track.id)}
+											>
+												<Heart
+													class="h-5 w-5 {track.favorite
+														? 'fill-red-500 text-red-500'
+														: 'text-muted-foreground'}"
+												/>
+											</button>
+										</TableCell>
 										<TableCell class="text-muted-foreground">
 											{track.playcount ?? 0}
 										</TableCell>
 										<TableCell class="text-muted-foreground">
 											{track.skipcount ?? 0}
+										</TableCell>
+										<TableCell class="text-muted-foreground">
+											{track.play_streak ?? 0}
 										</TableCell>
 										<TableCell>
 											<Button
@@ -357,3 +529,134 @@
 		</CardContent>
 	</Card>
 </div>
+
+<!-- Restore Dialog -->
+{#if showRestoreDialog}
+	<div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onclick={closeRestoreDialog}>
+		<div class="bg-background border-2 border-white rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col" onclick={(e) => e.stopPropagation()}>
+			<CardHeader class="flex-shrink-0 pb-3">
+				<div class="flex items-center justify-between">
+					<CardTitle>Restore Tracks from All Tracks</CardTitle>
+					<Button variant="ghost" size="sm" onclick={closeRestoreDialog}>
+						<X class="h-4 w-4" />
+					</Button>
+				</div>
+			</CardHeader>
+			<CardContent class="flex-1 flex flex-col min-h-0 overflow-hidden">
+				<!-- Search and Restore All -->
+				<div class="mb-3 flex-shrink-0 space-y-3">
+					<div class="flex gap-3 items-center">
+						<div class="relative flex-1">
+							<Search class="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+							<input
+								type="text"
+								placeholder="Search removed tracks..."
+								class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 pl-10"
+								bind:value={removedTracksSearch}
+								oninput={handleRemovedTracksSearchInput}
+							/>
+						</div>
+						{#if removedTracksTotalCount > 0 && !removedTracksSearch.trim()}
+							<Button
+								onclick={handleRestoreAll}
+								disabled={restoringAll}
+							>
+								<RotateCcw class="h-4 w-4 mr-2" />
+								{restoringAll ? 'Restoring...' : `Restore All (${removedTracksTotalCount})`}
+							</Button>
+						{/if}
+					</div>
+				</div>
+
+				{#if removedTracksLoading}
+					<div class="flex-1 flex items-center justify-center">
+						<div class="text-center text-muted-foreground">Loading removed tracks...</div>
+					</div>
+				{:else if removedTracks.length === 0}
+					<div class="flex-1 flex items-center justify-center">
+						<div class="text-center text-muted-foreground">
+							{#if removedTracksSearch.trim()}
+								No removed tracks found matching your search
+							{:else}
+								No removed tracks found
+							{/if}
+						</div>
+					</div>
+				{:else}
+					<div class="flex-1 flex flex-col min-h-0 overflow-hidden">
+						<div class="flex-1 overflow-y-auto min-h-0">
+							<Table class="border-2 border-white">
+								<TableHeader>
+									<TableRow>
+										<TableHead>Artist</TableHead>
+										<TableHead>Track Name</TableHead>
+										<TableHead>Album</TableHead>
+										<TableHead>Genre</TableHead>
+										<TableHead class="w-24">Actions</TableHead>
+									</TableRow>
+								</TableHeader>
+								<TableBody>
+									{#each removedTracks as track}
+										<TableRow>
+											<TableCell class="font-medium">{track.artist_name || '-'}</TableCell>
+											<TableCell>{track.track_name}</TableCell>
+											<TableCell class="text-muted-foreground">
+												{track.album || '-'}
+											</TableCell>
+											<TableCell class="text-muted-foreground">
+												{track.genre || '-'}
+											</TableCell>
+											<TableCell>
+												<Button
+													variant="outline"
+													size="sm"
+													onclick={() => handleRestoreTrack(track.id)}
+													disabled={restoringTrackId === track.id}
+												>
+													<RotateCcw class="h-4 w-4 mr-1" />
+													Restore
+												</Button>
+											</TableCell>
+										</TableRow>
+									{/each}
+								</TableBody>
+							</Table>
+						</div>
+
+						<!-- Pagination -->
+						{#if removedTracksTotalPages > 1}
+							<div class="flex items-center justify-between flex-shrink-0 pt-4 border-t border-border mt-4">
+								<div class="text-sm text-muted-foreground">
+									Showing {((removedTracksPage - 1) * 50) + 1} to {Math.min(removedTracksPage * 50, removedTracksTotalCount)} of {removedTracksTotalCount} tracks
+								</div>
+								<div class="flex items-center gap-2">
+									<Button
+										variant="outline"
+										size="sm"
+										onclick={() => loadRemovedTracks(removedTracksPage - 1)}
+										disabled={removedTracksPage === 1 || removedTracksLoading}
+									>
+										<ChevronLeft class="h-4 w-4" />
+										Previous
+									</Button>
+									<div class="text-sm">
+										Page {removedTracksPage} of {removedTracksTotalPages}
+									</div>
+									<Button
+										variant="outline"
+										size="sm"
+										onclick={() => loadRemovedTracks(removedTracksPage + 1)}
+										disabled={removedTracksPage === removedTracksTotalPages || removedTracksLoading}
+									>
+										Next
+										<ChevronRight class="h-4 w-4" />
+									</Button>
+								</div>
+							</div>
+						{/if}
+					</div>
+				{/if}
+			</CardContent>
+		</div>
+	</div>
+{/if}

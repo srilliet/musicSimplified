@@ -16,5 +16,8 @@ urlpatterns = [
     path('user-tracks/<int:track_id>/restore/', user_tracks_views.restore_track_to_library, name='restore_track_to_library'),
     path('user-tracks/genres/', user_tracks_views.get_user_tracks_genres, name='get_user_tracks_genres'),
     path('user-tracks/artists/', user_tracks_views.get_user_tracks_artists, name='get_user_tracks_artists'),
+    path('user-tracks/removed/', user_tracks_views.get_removed_tracks, name='get_removed_tracks'),
+    path('user-tracks/restore-all/', user_tracks_views.restore_all_tracks, name='restore_all_tracks'),
+    path('user-tracks/<int:track_id>/update/', user_tracks_views.update_user_track, name='update_user_track'),
 ]
 
