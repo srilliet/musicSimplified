@@ -19,16 +19,41 @@ class SettingsAdmin(admin.ModelAdmin):
 
 @admin.register(Track)
 class TrackAdmin(admin.ModelAdmin):
-    list_display = ('id', 'track_name', 'artist_name', 'album', 'genre', 'relative_path')
+    list_display = ('id', 'track_name', 'artist_name', 'album', 'genre', 'playcount', 'skipcount', 'relative_path')
     list_filter = ('artist_name', 'genre')
     search_fields = ('track_name', 'artist_name', 'album', 'genre', 'relative_path')
-    ordering = ('id',)
-    readonly_fields = ('relative_path',) if 'relative_path' in [f.name for f in Track._meta.get_fields()] else ()
+    ordering = ('artist_name', 'track_name')
+    readonly_fields = ('relative_path',)
+    
+    fieldsets = (
+        ('Track Information', {
+            'fields': ('track_name', 'artist_name', 'album', 'genre')
+        }),
+        ('Playback Statistics', {
+            'fields': ('playcount', 'skipcount')
+        }),
+        ('File Information', {
+            'fields': ('relative_path',)
+        }),
+    )
 
 
 @admin.register(NewTrack)
 class NewTrackAdmin(admin.ModelAdmin):
-    list_display = ('id', 'track_name', 'artist_name', 'album', 'genre')
-    list_filter = ('artist_name', 'genre')
+    list_display = ('id', 'track_name', 'artist_name', 'album', 'genre', 'downloaded', 'success')
+    list_filter = ('artist_name', 'genre', 'downloaded', 'success')
     search_fields = ('track_name', 'artist_name', 'album', 'genre')
     ordering = ('artist_name', 'track_name')
+    
+    fieldsets = (
+        ('Track Information', {
+            'fields': ('track_name', 'artist_name', 'album', 'genre')
+        }),
+        ('Download Status', {
+            'fields': ('downloaded', 'success')
+        }),
+    )
+    
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related()

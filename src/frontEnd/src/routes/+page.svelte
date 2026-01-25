@@ -5,13 +5,10 @@
 	import CardContent from '$lib/components/ui/card-content.svelte';
 </script>
 
-<div class="space-y-6">
-	<!-- Page Header -->
-	<div class="mb-4">
-		<h1 class="text-3xl font-bold">Home</h1>
-	</div>
+<h2 class="text-3xl font-bold mb-6">Home</h2>
 
-	<Card>
+<div class="space-y-6">
+	<Card class="border-2 border-white">
 		<CardHeader>
 			<CardTitle>Welcome to MusicSimplify</CardTitle>
 		</CardHeader>
