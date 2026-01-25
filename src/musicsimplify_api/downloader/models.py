@@ -1,5 +1,6 @@
 from django.db import models
 from django.core.exceptions import ValidationError
+from django.contrib.auth.models import User
 
 
 class Settings(models.Model):
@@ -46,14 +47,37 @@ class Track(models.Model):
     artist_name = models.CharField(max_length=500, blank=True, null=True)
     genre = models.CharField(max_length=200, blank=True, null=True)
     relative_path = models.CharField(max_length=1000, blank=True, null=True)  # Relative path from root, e.g., "Zakk Wylde/book of shadows/between heaven & hell.mp3"
-    playcount = models.IntegerField(default=0)
-    skipcount = models.IntegerField(default=0)
     
     class Meta:
         db_table = 'tracks'
     
     def __str__(self):
         return f"{self.artist_name} - {self.track_name}"
+
+
+class UserTrack(models.Model):
+    """
+    User-specific track library and statistics.
+    Links users to tracks and tracks removal status and playback statistics.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='user_tracks')
+    track = models.ForeignKey(Track, on_delete=models.CASCADE, related_name='user_tracks')
+    is_removed = models.BooleanField(default=False)  # True if user removed from their library
+    playcount = models.IntegerField(default=0)  # User-specific play count
+    skipcount = models.IntegerField(default=0)  # User-specific skip count
+    added_at = models.DateTimeField(auto_now_add=True)
+    removed_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        db_table = 'user_tracks'
+        unique_together = [['user', 'track']]  # One record per user-track pair
+        indexes = [
+            models.Index(fields=['user', 'is_removed']),
+            models.Index(fields=['user', 'track']),
+        ]
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.track.track_name}"
 
 
 class NewTrack(models.Model):

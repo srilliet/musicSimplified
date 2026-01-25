@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Track, NewTrack, Settings
+from .models import Track, NewTrack, Settings, UserTrack
 
 
 @admin.register(Settings)
@@ -19,7 +19,7 @@ class SettingsAdmin(admin.ModelAdmin):
 
 @admin.register(Track)
 class TrackAdmin(admin.ModelAdmin):
-    list_display = ('id', 'track_name', 'artist_name', 'album', 'genre', 'playcount', 'skipcount', 'relative_path')
+    list_display = ('id', 'track_name', 'artist_name', 'album', 'genre', 'relative_path')
     list_filter = ('artist_name', 'genre')
     search_fields = ('track_name', 'artist_name', 'album', 'genre', 'relative_path')
     ordering = ('artist_name', 'track_name')
@@ -28,9 +28,6 @@ class TrackAdmin(admin.ModelAdmin):
     fieldsets = (
         ('Track Information', {
             'fields': ('track_name', 'artist_name', 'album', 'genre')
-        }),
-        ('Playback Statistics', {
-            'fields': ('playcount', 'skipcount')
         }),
         ('File Information', {
             'fields': ('relative_path',)
@@ -57,3 +54,27 @@ class NewTrackAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         return qs.select_related()
+
+
+@admin.register(UserTrack)
+class UserTrackAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'track', 'is_removed', 'playcount', 'skipcount', 'added_at')
+    list_filter = ('is_removed', 'user', 'added_at')
+    search_fields = ('user__username', 'track__track_name', 'track__artist_name')
+    ordering = ('-added_at',)
+    readonly_fields = ('added_at',)
+    
+    fieldsets = (
+        ('User & Track', {
+            'fields': ('user', 'track')
+        }),
+        ('Library Status', {
+            'fields': ('is_removed', 'removed_at')
+        }),
+        ('Playback Statistics', {
+            'fields': ('playcount', 'skipcount')
+        }),
+        ('Timestamps', {
+            'fields': ('added_at',)
+        }),
+    )

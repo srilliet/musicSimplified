@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getExistingTracks, getExistingTracksGenres, getExistingTracksArtists } from '$lib/api/tracks';
-	import type { RecommendedTrack, PaginatedResponse } from '$lib/schema';
+	import { getUserTracks, getUserTracksGenres, getUserTracksArtists, removeTrackFromLibrary, initializeUserLibrary } from '$lib/api/tracks';
+	import type { UserTrack, UserTracksPaginatedResponse } from '$lib/schema';
 	import Table from '$lib/components/ui/table.svelte';
 	import TableHeader from '$lib/components/ui/table-header.svelte';
 	import TableBody from '$lib/components/ui/table-body.svelte';
@@ -14,9 +14,9 @@
 	import CardTitle from '$lib/components/ui/card-title.svelte';
 	import CardContent from '$lib/components/ui/card-content.svelte';
 	import Checkbox from '$lib/components/ui/checkbox.svelte';
-	import { ChevronLeft, ChevronRight, Search, X } from 'lucide-svelte';
+	import { ChevronLeft, ChevronRight, Search, X, Trash2 } from 'lucide-svelte';
 
-	let tracks = $state<RecommendedTrack[]>([]);
+	let tracks = $state<UserTrack[]>([]);
 	let currentPage = $state(1);
 	let pageSize = $state(100);
 	let totalPages = $state(1);
@@ -29,13 +29,14 @@
 	let genres = $state<string[]>([]);
 	let artists = $state<string[]>([]);
 	let selectedTrackIds = $state<Set<number>>(new Set());
+	let removingTrackId = $state<number | null>(null);
 
 	async function loadTracks(page: number = 1) {
 		loading = true;
 		error = null;
 
 		try {
-			const data: PaginatedResponse = await getExistingTracks(page, pageSize, {
+			const data: UserTracksPaginatedResponse = await getUserTracks(page, pageSize, {
 				search: searchQuery.trim() || undefined,
 				genre: selectedGenre || undefined,
 				artistName: selectedArtist || undefined
@@ -44,15 +45,11 @@
 			currentPage = data.page;
 			totalPages = data.total_pages;
 			totalCount = data.count;
-			// Clear selections when tracks change (new page or filter)
 			selectedTrackIds = new Set();
 		} catch (err) {
 			if (err instanceof Error) {
 				error = err.message;
 				console.error('Error loading tracks:', err);
-			} else if (err instanceof TypeError && err.message.includes('fetch')) {
-				error = 'Network error: Unable to connect to API. Please check if the server is running.';
-				console.error('Network error:', err);
 			} else {
 				error = 'Failed to load tracks';
 				console.error('Unknown error:', err);
@@ -64,7 +61,7 @@
 
 	async function loadGenres() {
 		try {
-			genres = await getExistingTracksGenres();
+			genres = await getUserTracksGenres();
 		} catch (err) {
 			console.error('Error loading genres:', err);
 		}
@@ -72,9 +69,32 @@
 
 	async function loadArtists() {
 		try {
-			artists = await getExistingTracksArtists();
+			artists = await getUserTracksArtists();
 		} catch (err) {
 			console.error('Error loading artists:', err);
+		}
+	}
+
+	async function handleRemoveTrack(trackId: number) {
+		if (!confirm('Remove this track from your library?')) {
+			return;
+		}
+
+		removingTrackId = trackId;
+		try {
+			await removeTrackFromLibrary(trackId);
+			await loadTracks(currentPage);
+			await loadGenres();
+			await loadArtists();
+		} catch (err) {
+			if (err instanceof Error) {
+				error = err.message;
+			} else {
+				error = 'Failed to remove track';
+			}
+			console.error('Error removing track:', err);
+		} finally {
+			removingTrackId = null;
 		}
 	}
 
@@ -99,21 +119,22 @@
 	function handleSearchInput(e: Event) {
 		const target = e.target as HTMLInputElement;
 		searchQuery = target.value;
-		currentPage = 1; // Reset to first page on search
-		loadTracks(1);
+		// Debounce search - reload after user stops typing
+		clearTimeout((handleSearchInput as any).timeout);
+		(handleSearchInput as any).timeout = setTimeout(() => {
+			loadTracks(1);
+		}, 500);
 	}
 
 	function handleGenreChange(e: Event) {
 		const target = e.target as HTMLSelectElement;
 		selectedGenre = target.value;
-		currentPage = 1; // Reset to first page on filter
 		loadTracks(1);
 	}
 
 	function handleArtistChange(e: Event) {
 		const target = e.target as HTMLSelectElement;
 		selectedArtist = target.value;
-		currentPage = 1; // Reset to first page on filter
 		loadTracks(1);
 	}
 
@@ -121,46 +142,48 @@
 		searchQuery = '';
 		selectedGenre = '';
 		selectedArtist = '';
-		currentPage = 1;
 		loadTracks(1);
+	}
+
+	let allSelected = $derived(
+		tracks.length > 0 && tracks.every((track) => selectedTrackIds.has(track.id))
+	);
+
+	function toggleSelectAll() {
+		if (allSelected) {
+			selectedTrackIds = new Set();
+		} else {
+			selectedTrackIds = new Set(tracks.map((track) => track.id));
+		}
 	}
 
 	function toggleTrackSelection(trackId: number) {
 		if (selectedTrackIds.has(trackId)) {
 			selectedTrackIds.delete(trackId);
+			selectedTrackIds = new Set(selectedTrackIds);
 		} else {
 			selectedTrackIds.add(trackId);
-		}
-		selectedTrackIds = new Set(selectedTrackIds); // Trigger reactivity
-	}
-
-	function toggleSelectAll() {
-		if (selectedTrackIds.size === tracks.length) {
-			selectedTrackIds = new Set();
-		} else {
-			selectedTrackIds = new Set(tracks.map(track => track.id));
+			selectedTrackIds = new Set(selectedTrackIds);
 		}
 	}
 
-	let allSelected = $derived(tracks.length > 0 && selectedTrackIds.size === tracks.length);
-
-	onMount(() => {
-		loadGenres();
-		loadArtists();
-		loadTracks();
+	onMount(async () => {
+		try {
+			await initializeUserLibrary();
+		} catch (err) {
+			console.error('Error initializing library:', err);
+		}
+		await Promise.all([loadTracks(1), loadGenres(), loadArtists()]);
 	});
 </script>
 
-<div class="flex flex-col h-[calc(100vh-80px)] overflow-hidden">
-	<!-- Page Header -->
-	<div class="mb-4 flex-shrink-0">
-		<h1 class="text-3xl font-bold">All Tracks</h1>
-	</div>
+<h2 class="text-3xl font-bold mb-6">My Library</h2>
 
-	<!-- All Tracks Card -->
+<div class="flex flex-col h-[calc(100vh-80px)] overflow-hidden">
+	<!-- My Library Card -->
 	<Card class="border-2 border-white flex-1 flex flex-col min-h-0 overflow-hidden">
 		<CardHeader class="flex-shrink-0 pb-3">
-			<CardTitle>All Tracks</CardTitle>
+			<CardTitle>My Library</CardTitle>
 		</CardHeader>
 		<CardContent class="flex-1 flex flex-col min-h-0 overflow-hidden">
 			<!-- Filters -->
@@ -236,7 +259,7 @@
 						{#if searchQuery.trim() || selectedGenre || selectedArtist}
 							No tracks found matching your filters
 						{:else}
-							No existing tracks found
+							No tracks in your library
 						{/if}
 					</div>
 				</div>
@@ -256,7 +279,9 @@
 									<TableHead>Track Name</TableHead>
 									<TableHead>Album</TableHead>
 									<TableHead>Genre</TableHead>
-									<TableHead>Relative Path</TableHead>
+									<TableHead>Play Count</TableHead>
+									<TableHead>Skip Count</TableHead>
+									<TableHead class="w-24">Actions</TableHead>
 								</TableRow>
 							</TableHeader>
 							<TableBody>
@@ -276,8 +301,21 @@
 										<TableCell class="text-muted-foreground">
 											{track.genre || '-'}
 										</TableCell>
-										<TableCell class="text-muted-foreground text-sm">
-											{track.relative_path || '-'}
+										<TableCell class="text-muted-foreground">
+											{track.playcount ?? 0}
+										</TableCell>
+										<TableCell class="text-muted-foreground">
+											{track.skipcount ?? 0}
+										</TableCell>
+										<TableCell>
+											<Button
+												variant="ghost"
+												size="sm"
+												onclick={() => handleRemoveTrack(track.id)}
+												disabled={removingTrackId === track.id}
+											>
+												<Trash2 class="h-4 w-4" />
+											</Button>
 										</TableCell>
 									</TableRow>
 								{/each}

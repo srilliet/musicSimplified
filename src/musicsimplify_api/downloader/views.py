@@ -5,7 +5,8 @@ from pathlib import Path
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-from .models import Track, Settings
+from .models import Track, Settings, UserTrack
+from django.utils import timezone
 
 
 def sanitize_filename(filename):
@@ -213,8 +214,6 @@ def get_tracks(request):
             'album': track.album,
             'genre': track.genre,
             'relative_path': track.relative_path,
-            'playcount': track.playcount,
-            'skipcount': track.skipcount
         })
     
     return Response({
