@@ -34,6 +34,27 @@
 	let loadingArtist = $state(false);
 	let selectedTrackIds = $state<Set<number>>(new Set());
 	let downloadingTracks = $state(false);
+	let downloadStatus = $state<{
+		show: boolean;
+		message: string;
+		current: number;
+		total: number;
+		successful: number;
+		failed: number;
+		skipped: number;
+		currentTrack: string;
+		error: string | null;
+	}>({
+		show: false,
+		message: '',
+		current: 0,
+		total: 0,
+		successful: 0,
+		failed: 0,
+		skipped: 0,
+		currentTrack: '',
+		error: null
+	});
 	let artistStatus = $state<{
 		show: boolean;
 		message: string;
@@ -177,25 +198,73 @@
 
 	async function handleDownloadSelected() {
 		if (selectedTrackIds.size === 0) {
+			alert('Please select at least one track to download');
+			return;
+		}
+
+		if (!confirm(`Download ${selectedTrackIds.size} selected track(s)?`)) {
 			return;
 		}
 
 		downloadingTracks = true;
+		downloadStatus = {
+			show: true,
+			message: 'Starting download...',
+			current: 0,
+			total: selectedTrackIds.size,
+			successful: 0,
+			failed: 0,
+			skipped: 0,
+			currentTrack: '',
+			error: null
+		};
+
 		try {
 			const trackIdsArray = Array.from(selectedTrackIds);
 			const result = await downloadSelectedTracks(trackIdsArray);
 			
-			// Show success message
-			alert(`Download complete: ${result.successful} successful, ${result.failed} failed`);
+			// Update status with final results
+			downloadStatus = {
+				show: true,
+				message: 'Download complete!',
+				current: result.total || trackIdsArray.length,
+				total: result.total || trackIdsArray.length,
+				successful: result.successful,
+				failed: result.failed || 0,
+				skipped: result.skipped || 0,
+				currentTrack: '',
+				error: null
+			};
 			
 			// Clear selections
 			selectedTrackIds = new Set();
 			
 			// Reload tracks to update the list (downloaded tracks will be filtered out)
-			await loadTracks(currentPage);
+			// If we're on a page that might now be empty, go to page 1
+			await loadTracks(1);
+			
+			// Auto-hide after 5 seconds
+			setTimeout(() => {
+				downloadStatus.show = false;
+			}, 5000);
 		} catch (err) {
 			console.error('Error downloading tracks:', err);
-			alert(err instanceof Error ? err.message : 'Failed to download tracks');
+			downloadStatus = {
+				show: true,
+				message: 'Download failed',
+				current: downloadStatus.current,
+				total: downloadStatus.total,
+				successful: downloadStatus.successful,
+				failed: downloadStatus.failed,
+				skipped: downloadStatus.skipped,
+				currentTrack: '',
+				error: err instanceof Error ? err.message : 'Failed to download tracks'
+			};
+			
+			// Auto-hide after 5 seconds
+			setTimeout(() => {
+				downloadStatus.show = false;
+			}, 5000);
 		} finally {
 			downloadingTracks = false;
 		}
@@ -284,6 +353,45 @@
 	<div class="mb-4 flex-shrink-0">
 		<h1 class="text-3xl font-bold">Recommended Tracks</h1>
 	</div>
+
+	<!-- Download Status Dialog -->
+	{#if downloadStatus.show}
+		<div class="fixed top-20 right-6 z-50 max-w-md">
+			<Card class="border-2 {downloadStatus.error ? 'border-destructive' : downloadingTracks ? 'border-blue-500' : 'border-green-500'}">
+				<CardHeader class="pb-3">
+					<CardTitle class="text-lg">
+						{downloadStatus.error ? 'Download Error' : downloadingTracks ? 'Downloading...' : 'Download Complete'}
+					</CardTitle>
+				</CardHeader>
+				<CardContent class="pt-0">
+					<div class="space-y-2">
+						<p class="text-sm font-medium">{downloadStatus.message}</p>
+						{#if downloadStatus.error}
+							<p class="text-sm text-destructive">{downloadStatus.error}</p>
+						{:else}
+							<div class="text-sm text-muted-foreground space-y-1">
+								{#if downloadingTracks}
+									<p>Progress: {downloadStatus.current} of {downloadStatus.total}</p>
+									{#if downloadStatus.currentTrack}
+										<p class="font-medium">Current: {downloadStatus.currentTrack}</p>
+									{/if}
+								{:else}
+									<p>Total tracks: {downloadStatus.total}</p>
+									<p class="text-green-600">✓ Successful: {downloadStatus.successful}</p>
+									{#if downloadStatus.failed > 0}
+										<p class="text-destructive">✗ Failed: {downloadStatus.failed}</p>
+									{/if}
+									{#if downloadStatus.skipped > 0}
+										<p class="text-yellow-600">⊘ Skipped: {downloadStatus.skipped}</p>
+									{/if}
+								{/if}
+							</div>
+						{/if}
+					</div>
+				</CardContent>
+			</Card>
+		</div>
+	{/if}
 
 	<!-- Status Dialog -->
 	{#if artistStatus.show}
@@ -417,12 +525,17 @@
 				</div>
 				<!-- Download Selected Button -->
 				<div class="flex justify-start">
-					<Button
-						onclick={handleDownloadSelected}
+					<button
+						type="button"
+						class="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2"
+						onclick={() => {
+							console.log('Download button clicked, selectedTrackIds:', selectedTrackIds.size);
+							handleDownloadSelected();
+						}}
 						disabled={selectedTrackIds.size === 0 || downloadingTracks}
 					>
 						{downloadingTracks ? 'Downloading...' : `Download Selected Songs (${selectedTrackIds.size})`}
-					</Button>
+					</button>
 				</div>
 			</div>
 

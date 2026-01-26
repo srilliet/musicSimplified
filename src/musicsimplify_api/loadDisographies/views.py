@@ -1,9 +1,10 @@
 import os
 import time
 import logging
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
 from downloader.models import Track, NewTrack
 from artistFetcher.views import fetch_artist_discography_helper
 import musicbrainzngs
@@ -317,12 +318,154 @@ def get_artists(request):
     }, status=status.HTTP_200_OK)
 
 
-@api_view(['POST'])
-def download_selected_tracks(request):
-    """Download multiple NewTrack objects by their IDs"""
+def safe_unicode_string(text):
+    """Safely handle Unicode strings, removing invalid surrogates."""
+    if text is None:
+        return None
+    try:
+        text.encode('utf-8', errors='strict')
+        return text
+    except (UnicodeEncodeError, AttributeError, TypeError):
+        text = str(text)
+        return text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+
+
+def download_track_from_newtrack(new_track, download_dir, root_music_path):
+    """
+    Download a track from NewTrack table using the comprehensive logic from the script.
+    
+    Returns:
+        dict: Result with 'success', 'file_path', 'method', 'error', 'relative_path'
+    """
     from downloader.views import download_with_ytdlp, download_with_spotdl
+    from pathlib import Path
+    
+    track_name = new_track.track_name
+    artist_name = new_track.artist_name
+    album = new_track.album
+    
+    # Try yt-dlp first
+    file_path = download_with_ytdlp(track_name, artist_name, album, download_dir)
+    
+    if file_path:
+        # Verify file actually exists and has content
+        file_path_obj = Path(file_path)
+        if not file_path_obj.exists():
+            return {
+                'success': False,
+                'error': 'File not found after download'
+            }
+        
+        file_size = file_path_obj.stat().st_size
+        if file_size == 0:
+            return {
+                'success': False,
+                'error': 'Downloaded file is empty'
+            }
+        
+        # Calculate relative path from root_music_path
+        try:
+            relative_path = os.path.relpath(file_path, root_music_path)
+            relative_path = safe_unicode_string(relative_path)
+        except:
+            relative_path = None
+        
+        return {
+            'success': True,
+            'file_path': file_path,
+            'method': 'yt-dlp',
+            'relative_path': relative_path
+        }
+    
+    # Try spotdl as fallback
+    file_path = download_with_spotdl(track_name, artist_name, album, download_dir)
+    
+    if file_path:
+        # Verify file actually exists and has content
+        file_path_obj = Path(file_path)
+        if not file_path_obj.exists():
+            return {
+                'success': False,
+                'error': 'File not found after download'
+            }
+        
+        file_size = file_path_obj.stat().st_size
+        if file_size == 0:
+            return {
+                'success': False,
+                'error': 'Downloaded file is empty'
+            }
+        
+        # Calculate relative path from root_music_path
+        try:
+            relative_path = os.path.relpath(file_path, root_music_path)
+            relative_path = safe_unicode_string(relative_path)
+        except:
+            relative_path = None
+        
+        return {
+            'success': True,
+            'file_path': file_path,
+            'method': 'spotdl',
+            'relative_path': relative_path
+        }
+    
+    return {
+        'success': False,
+        'error': 'Download failed with both methods'
+    }
+
+
+def find_or_create_track(new_track, relative_path):
+    """
+    Find existing track or create new one in tracks table.
+    
+    Args:
+        new_track (NewTrack): NewTrack instance
+        relative_path (str): Relative path to the file
+        
+    Returns:
+        Track: Track instance
+    """
+    # Try to find existing track by relative_path
+    if relative_path:
+        existing = Track.objects.filter(relative_path=relative_path).first()
+        if existing:
+            return existing
+    
+    # Try to find by artist + track name
+    existing = Track.objects.filter(
+        artist_name__iexact=new_track.artist_name,
+        track_name__iexact=new_track.track_name
+    ).first()
+    
+    if existing:
+        # Update with relative_path if missing
+        if relative_path and not existing.relative_path:
+            existing.relative_path = safe_unicode_string(relative_path)
+            existing.save()
+        return existing
+    
+    # Create new track
+    track = Track(
+        track_name=safe_unicode_string(new_track.track_name),
+        artist_name=safe_unicode_string(new_track.artist_name),
+        album=safe_unicode_string(new_track.album) if new_track.album else None,
+        genre=safe_unicode_string(new_track.genre) if new_track.genre else None,
+        relative_path=safe_unicode_string(relative_path) if relative_path else None
+    )
+    track.save()
+    return track
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def download_selected_tracks(request):
+    """
+    Download multiple NewTrack objects by their IDs.
+    Uses comprehensive download logic from the script.
+    """
     from downloader.models import Settings
-    import os
     
     track_ids = request.data.get('track_ids', [])
     
@@ -335,67 +478,118 @@ def download_selected_tracks(request):
     # Get download directory from settings
     settings = Settings.get_settings()
     download_dir = settings.root_music_path
+    root_music_path = settings.root_music_path
+    
+    if not download_dir:
+        return Response(
+            {'error': 'Download directory not configured in settings'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
     
     successful = 0
     failed = 0
+    skipped = 0
     results = []
+    total_tracks = len(track_ids)
     
-    for track_id in track_ids:
+    for i, track_id in enumerate(track_ids, 1):
         try:
-            new_track = NewTrack.objects.get(id=track_id, success=False)
+            new_track = NewTrack.objects.get(id=track_id)
         except NewTrack.DoesNotExist:
             failed += 1
             results.append({
                 'track_id': track_id,
                 'success': False,
-                'error': 'Track not found or already downloaded'
+                'error': 'Track not found',
+                'progress': {
+                    'current': i,
+                    'total': total_tracks,
+                    'track_name': 'Unknown'
+                }
             })
             continue
         
-        # Mark as attempted
+        track_name = new_track.track_name
+        artist_name = new_track.artist_name
+        
+        # Skip if already successfully downloaded
+        if new_track.success:
+            skipped += 1
+            results.append({
+                'track_id': track_id,
+                'success': False,
+                'error': 'Track already downloaded',
+                'skipped': True,
+                'progress': {
+                    'current': i,
+                    'total': total_tracks,
+                    'track_name': track_name,
+                    'artist_name': artist_name
+                }
+            })
+            continue
+        
+        # Mark as downloaded (attempted)
         new_track.downloaded = True
         new_track.save()
         
-        # Try downloading
-        file_path = None
+        # Download the track
+        result = download_track_from_newtrack(new_track, download_dir, root_music_path)
         
-        # Try yt-dlp first
-        file_path = download_with_ytdlp(
-            new_track.track_name,
-            new_track.artist_name,
-            new_track.album,
-            download_dir
-        )
-        
-        # If yt-dlp fails, try spotdl
-        if not file_path:
-            file_path = download_with_spotdl(
-                new_track.track_name,
-                new_track.artist_name,
-                new_track.album,
-                download_dir
-            )
-        
-        if file_path:
+        if result.get('success'):
+            # Update new_tracks table - mark as successfully downloaded
             new_track.success = True
+            new_track.downloaded = True
             new_track.save()
+            
+            # Refresh from database to ensure changes are committed
+            new_track.refresh_from_db()
+            
+            # Update or create track in tracks table
+            relative_path = result.get('relative_path')
+            track = find_or_create_track(new_track, relative_path)
+            
             successful += 1
             results.append({
                 'track_id': track_id,
                 'success': True,
-                'file_path': file_path
+                'file_path': result.get('file_path'),
+                'method': result.get('method'),
+                'relative_path': relative_path,
+                'track_id_created': track.id,
+                'progress': {
+                    'current': i,
+                    'total': total_tracks,
+                    'track_name': track_name,
+                    'artist_name': artist_name
+                }
             })
         else:
+            new_track.success = False
+            new_track.save()
             failed += 1
+            error = result.get('error', 'Unknown error')
             results.append({
                 'track_id': track_id,
                 'success': False,
-                'error': 'Download failed with both methods'
+                'error': error,
+                'progress': {
+                    'current': i,
+                    'total': total_tracks,
+                    'track_name': track_name,
+                    'artist_name': artist_name
+                }
             })
+        
+        # Rate limiting - wait between downloads (except for the last one)
+        if i < len(track_ids):
+            time.sleep(2)  # 2 second delay between downloads
     
     return Response({
-        'message': f'Downloaded {successful} tracks, {failed} failed',
+        'message': f'Downloaded {successful} tracks, {failed} failed, {skipped} skipped',
         'successful': successful,
         'failed': failed,
+        'skipped': skipped,
+        'total': len(track_ids),
         'results': results
     }, status=status.HTTP_200_OK)
