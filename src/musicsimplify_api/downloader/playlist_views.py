@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.db import models
+from django.db.models import F
 from .models import Playlist, PlaylistTrack, Track
 
 
@@ -146,4 +147,88 @@ def add_tracks_to_playlist(request, playlist_id):
         'skipped': skipped_count,
         'not_found': not_found_count,
         'total_requested': len(track_ids)
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_playlist_tracks(request, playlist_id):
+    """
+    Get all tracks in a specific playlist.
+    """
+    user = request.user
+    
+    try:
+        playlist = Playlist.objects.get(id=playlist_id, user=user)
+    except Playlist.DoesNotExist:
+        return Response({'error': 'Playlist not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    # Get all tracks in the playlist, ordered by position
+    playlist_tracks = PlaylistTrack.objects.filter(playlist=playlist).select_related('track').order_by('position', 'added_at')
+    
+    tracks = []
+    for playlist_track in playlist_tracks:
+        track = playlist_track.track
+        tracks.append({
+            'id': track.id,
+            'artist_name': track.artist_name,
+            'track_name': track.track_name,
+            'album': track.album,
+            'genre': track.genre,
+            'relative_path': track.relative_path,
+            'position': playlist_track.position,
+            'added_at': playlist_track.added_at.isoformat()
+        })
+    
+    return Response({
+        'playlist': {
+            'id': playlist.id,
+            'name': playlist.name,
+            'description': playlist.description,
+            'created_at': playlist.created_at.isoformat(),
+            'updated_at': playlist.updated_at.isoformat(),
+            'track_count': len(tracks)
+        },
+        'tracks': tracks,
+        'count': len(tracks)
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def remove_track_from_playlist(request, playlist_id, track_id):
+    """
+    Remove a track from a playlist.
+    """
+    user = request.user
+    
+    try:
+        playlist = Playlist.objects.get(id=playlist_id, user=user)
+    except Playlist.DoesNotExist:
+        return Response({'error': 'Playlist not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    try:
+        track = Track.objects.get(id=track_id)
+    except Track.DoesNotExist:
+        return Response({'error': 'Track not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    # Find and delete the PlaylistTrack entry
+    playlist_track = PlaylistTrack.objects.filter(playlist=playlist, track=track).first()
+    if not playlist_track:
+        return Response({'error': 'Track not found in playlist'}, status=status.HTTP_404_NOT_FOUND)
+    
+    removed_position = playlist_track.position
+    playlist_track.delete()
+    
+    # Reorder remaining tracks to fill the gap
+    # Get all tracks with position > removed_position and decrement them
+    PlaylistTrack.objects.filter(
+        playlist=playlist,
+        position__gt=removed_position
+    ).update(position=F('position') - 1)
+    
+    return Response({
+        'message': f'Track "{track.track_name}" removed from playlist',
+        'track_id': track_id,
+        'playlist_id': playlist_id
     }, status=status.HTTP_200_OK)

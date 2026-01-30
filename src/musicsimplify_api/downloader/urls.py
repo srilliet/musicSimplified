@@ -25,5 +25,7 @@ urlpatterns = [
     path('playlists/create/', playlist_views.create_playlist, name='create_playlist'),
     path('playlists/<int:playlist_id>/delete/', playlist_views.delete_playlist, name='delete_playlist'),
     path('playlists/<int:playlist_id>/add-tracks/', playlist_views.add_tracks_to_playlist, name='add_tracks_to_playlist'),
+    path('playlists/<int:playlist_id>/tracks/', playlist_views.get_playlist_tracks, name='get_playlist_tracks'),
+    path('playlists/<int:playlist_id>/tracks/<int:track_id>/remove/', playlist_views.remove_track_from_playlist, name='remove_track_from_playlist'),
 ]
 

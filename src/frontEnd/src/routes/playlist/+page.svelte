@@ -201,20 +201,27 @@
 						<div
 							class="flex items-center justify-between p-4 border border-border rounded-md hover:bg-accent/50 transition-colors"
 						>
-							<div class="flex-1">
+							<a
+								href={`/playlist/${playlist.id}`}
+								class="flex-1 cursor-pointer"
+							>
 								<div class="flex items-center gap-3 mb-1">
 									<Music class="h-5 w-5 text-muted-foreground" />
-									<h3 class="text-lg font-semibold">{playlist.name}</h3>
+									<h3 class="text-lg font-semibold hover:text-primary">{playlist.name}</h3>
 								</div>
 								<div class="flex items-center gap-4 text-xs text-muted-foreground ml-8">
 									<span>{playlist.track_count} track{playlist.track_count !== 1 ? 's' : ''}</span>
 									<span>Created {formatDate(playlist.created_at)}</span>
 								</div>
-							</div>
+							</a>
 							<Button
 								variant="ghost"
 								size="sm"
-								onclick={() => handleDeletePlaylist(playlist.id)}
+								onclick={(e) => {
+									e.preventDefault();
+									e.stopPropagation();
+									handleDeletePlaylist(playlist.id);
+								}}
 								disabled={deletingPlaylistId === playlist.id}
 								class="text-destructive hover:text-destructive hover:bg-destructive/10"
 							>
