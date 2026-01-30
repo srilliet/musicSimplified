@@ -2,7 +2,8 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
-from .models import Playlist
+from django.db import models
+from .models import Playlist, PlaylistTrack, Track
 
 
 @api_view(['GET'])
@@ -84,4 +85,65 @@ def delete_playlist(request, playlist_id):
     
     return Response({
         'message': f'Playlist "{playlist_name}" deleted successfully'
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def add_tracks_to_playlist(request, playlist_id):
+    """
+    Add multiple tracks to a playlist.
+    """
+    user = request.user
+    
+    try:
+        playlist = Playlist.objects.get(id=playlist_id, user=user)
+    except Playlist.DoesNotExist:
+        return Response({'error': 'Playlist not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    track_ids = request.data.get('track_ids', [])
+    
+    if not track_ids or not isinstance(track_ids, list):
+        return Response(
+            {'error': 'track_ids array is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Get the current maximum position in the playlist
+    max_position = PlaylistTrack.objects.filter(playlist=playlist).aggregate(
+        max_pos=models.Max('position')
+    )['max_pos'] or -1
+    
+    added_count = 0
+    skipped_count = 0
+    not_found_count = 0
+    
+    for track_id in track_ids:
+        try:
+            track = Track.objects.get(id=track_id)
+        except Track.DoesNotExist:
+            not_found_count += 1
+            continue
+        
+        # Check if track already exists in playlist
+        existing = PlaylistTrack.objects.filter(playlist=playlist, track=track).first()
+        if existing:
+            skipped_count += 1
+            continue
+        
+        # Add track to playlist
+        max_position += 1
+        PlaylistTrack.objects.create(
+            playlist=playlist,
+            track=track,
+            position=max_position
+        )
+        added_count += 1
+    
+    return Response({
+        'message': f'Added {added_count} tracks to playlist',
+        'added': added_count,
+        'skipped': skipped_count,
+        'not_found': not_found_count,
+        'total_requested': len(track_ids)
     }, status=status.HTTP_200_OK)

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getUserTracks, getUserTracksGenres, getUserTracksArtists, removeTrackFromLibrary, initializeUserLibrary, getRemovedTracks, restoreTrackToLibrary, restoreAllTracks, updateUserTrack, type RemovedTrack } from '$lib/api/tracks';
-	import type { UserTrack, UserTracksPaginatedResponse } from '$lib/schema';
+	import { getUserTracks, getUserTracksGenres, getUserTracksArtists, removeTrackFromLibrary, initializeUserLibrary, getRemovedTracks, restoreTrackToLibrary, restoreAllTracks, updateUserTrack, getPlaylists, addTracksToPlaylist, type RemovedTrack } from '$lib/api/tracks';
+	import type { UserTrack, UserTracksPaginatedResponse, Playlist } from '$lib/schema';
 	import Table from '$lib/components/ui/table.svelte';
 	import TableHeader from '$lib/components/ui/table-header.svelte';
 	import TableBody from '$lib/components/ui/table-body.svelte';
@@ -14,7 +14,7 @@
 	import CardTitle from '$lib/components/ui/card-title.svelte';
 	import CardContent from '$lib/components/ui/card-content.svelte';
 	import Checkbox from '$lib/components/ui/checkbox.svelte';
-	import { ChevronLeft, ChevronRight, Search, X, Trash2, RotateCcw, Star, Heart } from 'lucide-svelte';
+	import { ChevronLeft, ChevronRight, Search, X, Trash2, RotateCcw, Star, Heart, Plus } from 'lucide-svelte';
 
 	let tracks = $state<UserTrack[]>([]);
 	let currentPage = $state(1);
@@ -39,6 +39,10 @@
 	let removedTracksSearch = $state('');
 	let restoringTrackId = $state<number | null>(null);
 	let restoringAll = $state(false);
+	let showPlaylistDialog = $state(false);
+	let playlists = $state<Playlist[]>([]);
+	let loadingPlaylists = $state(false);
+	let addingToPlaylist = $state(false);
 
 	async function loadTracks(page: number = 1) {
 		loading = true;
@@ -297,6 +301,73 @@
 		}
 	}
 
+	async function loadPlaylists() {
+		loadingPlaylists = true;
+		try {
+			const data = await getPlaylists();
+			playlists = data.playlists;
+		} catch (err) {
+			if (err instanceof Error) {
+				error = err.message;
+			} else {
+				error = 'Failed to load playlists';
+			}
+			console.error('Error loading playlists:', err);
+		} finally {
+			loadingPlaylists = false;
+		}
+	}
+
+	function openPlaylistDialog() {
+		if (selectedTrackIds.size === 0) {
+			return;
+		}
+		showPlaylistDialog = true;
+		loadPlaylists();
+	}
+
+	function closePlaylistDialog() {
+		showPlaylistDialog = false;
+		playlists = [];
+	}
+
+	async function handleAddToPlaylist(playlistId: number) {
+		if (selectedTrackIds.size === 0) {
+			return;
+		}
+
+		addingToPlaylist = true;
+		error = null;
+
+		try {
+			const trackIdsArray = Array.from(selectedTrackIds);
+			const result = await addTracksToPlaylist(playlistId, trackIdsArray);
+			
+			let message = `Added ${result.added} track${result.added !== 1 ? 's' : ''} to playlist`;
+			if (result.skipped > 0) {
+				message += ` (${result.skipped} already in playlist)`;
+			}
+			if (result.not_found > 0) {
+				message += ` (${result.not_found} not found)`;
+			}
+			
+			alert(message);
+			selectedTrackIds = new Set();
+			closePlaylistDialog();
+		} catch (err) {
+			if (err instanceof Error) {
+				error = err.message;
+			} else {
+				error = 'Failed to add tracks to playlist';
+			}
+			console.error('Error adding tracks to playlist:', err);
+		} finally {
+			addingToPlaylist = false;
+		}
+	}
+
+	let hasSelectedTracks = $derived(selectedTrackIds.size > 0);
+
 	onMount(async () => {
 		try {
 			await initializeUserLibrary();
@@ -322,8 +393,23 @@
 			</div>
 		</CardHeader>
 		<CardContent class="flex-1 flex flex-col min-h-0 overflow-hidden">
-			<!-- Filters -->
+			<!-- Filters and Actions -->
 			<div class="mb-3 space-y-3 flex-shrink-0">
+				{#if hasSelectedTracks}
+					<div class="flex items-center gap-2 pb-2 border-b border-border">
+						<span class="text-sm text-muted-foreground">
+							{selectedTrackIds.size} track{selectedTrackIds.size !== 1 ? 's' : ''} selected
+						</span>
+						<Button
+							variant="default"
+							size="sm"
+							onclick={openPlaylistDialog}
+						>
+							<Plus class="h-4 w-4 mr-2" />
+							Add to Playlist
+						</Button>
+					</div>
+				{/if}
 				<div class="flex gap-3 items-end">
 					<!-- Search Input -->
 					<div class="flex-1 relative">
@@ -654,6 +740,64 @@
 								</div>
 							</div>
 						{/if}
+					</div>
+				{/if}
+			</CardContent>
+		</div>
+	</div>
+{/if}
+
+<!-- Add to Playlist Dialog -->
+{#if showPlaylistDialog}
+	<div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onclick={closePlaylistDialog}>
+		<div class="bg-background border-2 border-white rounded-lg w-full max-w-md flex flex-col" onclick={(e) => e.stopPropagation()}>
+			<CardHeader class="flex-shrink-0 pb-3">
+				<div class="flex items-center justify-between">
+					<CardTitle>Add to Playlist</CardTitle>
+					<Button variant="ghost" size="sm" onclick={closePlaylistDialog}>
+						<X class="h-4 w-4" />
+					</Button>
+				</div>
+			</CardHeader>
+			<CardContent class="flex-1 flex flex-col min-h-0 overflow-hidden">
+				<div class="mb-3 text-sm text-muted-foreground">
+					Select a playlist to add {selectedTrackIds.size} track{selectedTrackIds.size !== 1 ? 's' : ''} to:
+				</div>
+
+				{#if loadingPlaylists}
+					<div class="flex-1 flex items-center justify-center">
+						<div class="text-center text-muted-foreground">Loading playlists...</div>
+					</div>
+				{:else if playlists.length === 0}
+					<div class="flex-1 flex items-center justify-center">
+						<div class="text-center text-muted-foreground">
+							<p class="text-lg font-medium mb-2">No playlists found</p>
+							<p class="text-sm">Create a playlist first to add tracks</p>
+						</div>
+					</div>
+				{:else}
+					<div class="flex-1 overflow-y-auto min-h-0 space-y-2">
+						{#each playlists as playlist}
+							<Button
+								variant="outline"
+								class="w-full justify-start text-left h-auto py-3"
+								onclick={() => handleAddToPlaylist(playlist.id)}
+								disabled={addingToPlaylist}
+							>
+								<div class="flex-1">
+									<div class="font-medium">{playlist.name}</div>
+									<div class="text-xs text-muted-foreground mt-1">
+										{playlist.track_count} track{playlist.track_count !== 1 ? 's' : ''}
+									</div>
+								</div>
+							</Button>
+						{/each}
+					</div>
+				{/if}
+
+				{#if addingToPlaylist}
+					<div class="mt-4 text-sm text-muted-foreground text-center">
+						Adding tracks...
 					</div>
 				{/if}
 			</CardContent>

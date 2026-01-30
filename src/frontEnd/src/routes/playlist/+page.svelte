@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getPlaylists, createPlaylist, deletePlaylist } from '$lib/api/tracks';
+	import { playlistsStore } from '$lib/stores/playlists';
 	import type { Playlist } from '$lib/schema';
 	import Card from '$lib/components/ui/card.svelte';
 	import CardHeader from '$lib/components/ui/card-header.svelte';
@@ -56,6 +57,8 @@
 			playlists = [playlist, ...playlists];
 			newPlaylistName = '';
 			showCreateDialog = false;
+			// Refresh the playlists store so sidebar updates
+			await playlistsStore.load();
 		} catch (err) {
 			console.error('Error creating playlist:', err);
 			if (err instanceof Error) {
@@ -79,6 +82,8 @@
 		try {
 			await deletePlaylist(playlistId);
 			playlists = playlists.filter((p) => p.id !== playlistId);
+			// Refresh the playlists store so sidebar updates
+			await playlistsStore.load();
 		} catch (err) {
 			if (err instanceof Error) {
 				error = err.message;
